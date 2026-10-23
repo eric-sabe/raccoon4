@@ -34,6 +34,14 @@ java -jar build/libs/Raccoon-desktop-4.25.0.jar --help
 # Configure a Google Play profile (using App Password, aas_et/... master token, or oauth2_4/... token)
 java -jar build/libs/Raccoon-desktop-4.25.0.jar --gp-setup "user@gmail.com,app_password_or_token"
 
+# Generate & register a synthetic DummyDroid device & GSF ID (no physical phone required)
+java -jar build/libs/Raccoon-desktop-4.25.0.jar --dummydroid
+# or from a custom DummyDroid .properties / build.prop file:
+java -jar build/libs/Raccoon-desktop-4.25.0.jar --dummydroid mydevice.properties
+
+# Export a DummyDroid .properties profile (from connected phone or built-in preset)
+java -jar build/libs/Raccoon-desktop-4.25.0.jar --dummydroid-dump pixel7a.properties
+
 # Download an app from Google Play
 java -jar build/libs/Raccoon-desktop-4.25.0.jar --gpa-download com.example.app
 

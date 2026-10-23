@@ -574,7 +574,14 @@ public class Device {
 				for (String line : output) {
 					String[] tmp = line.split(":");
 					if (tmp.length == 2) {
-						features.add(tmp[1].trim());
+						String feat = tmp[1].trim();
+						int eq = feat.indexOf('=');
+						if (eq > 0) {
+							feat = feat.substring(0, eq).trim();
+						}
+						if (!feat.isEmpty() && !"reqGlEsVersion".equals(feat)) {
+							features.add(feat);
+						}
 					}
 				}
 			}
@@ -582,5 +589,25 @@ public class Device {
 			}
 		}
 		return features;
+	}
+
+	/**
+	 * Query physical screen width and height in pixels via "wm size".
+	 * 
+	 * @return two-element array [width, height] or [1080, 2400] on fallback
+	 */
+	public int[] getScreenSize() {
+		try {
+			String out = exec("wm size");
+			Matcher m = Pattern.compile("([0-9]+)x([0-9]+)").matcher(out);
+			if (m.find()) {
+				return new int[] {
+						Integer.parseInt(m.group(1)),
+						Integer.parseInt(m.group(2)) };
+			}
+		}
+		catch (Exception e) {
+		}
+		return new int[] { 1080, 2400 };
 	}
 }

@@ -27,6 +27,7 @@ import de.onyxbits.raccoon.db.DatabaseManager;
 import de.onyxbits.raccoon.db.VariableDao;
 import de.onyxbits.raccoon.gplay.PlayManager;
 import de.onyxbits.raccoon.gplay.PlayProfile;
+import de.onyxbits.raccoon.gplay.SyntheticDevice;
 import de.onyxbits.raccoon.gui.HyperTextPane;
 import de.onyxbits.raccoon.gui.Traits;
 
@@ -76,20 +77,23 @@ public class UploadLogic extends WizardBuilder {
 	@Override
 	protected void onDoInBackground() {
 		PlayProfile pp = globals.get(PlayProfile.class);
+		SyntheticDevice synth = globals.get(SyntheticDevice.class);
+		if (synth == null) {
+			synth = SyntheticDevice.createDefault();
+		}
 
-		if (pp.getAgent() == null) {
-			// TODO: rewrite the GooglePlayAPI. The whole device config stuff is
-			// hardcoded and poorly exposed.
-			pp.setAgent(new GooglePlayAPI("", "").getUseragent());
+		if (pp.getAgent() == null || pp.getAgent().trim().isEmpty()) {
+			pp.setAgent(synth.toFinskyUserAgent());
 		}
 
 		GooglePlayAPI api = PlayManager.createConnection(pp);
 		api.setClient(LoginLogic.createLoginClient());
 		try {
 			if (pp.getGsfId() == null || pp.getGsfId().trim().isEmpty()) {
-				api.checkin(); // Generates the GSF ID
+				api.checkin(synth.toAndroidCheckinRequest()); // DummyDroid GSF ID
 				api.login();
-				api.uploadDeviceConfig();
+				api.uploadDeviceConfig(synth.toDeviceConfigurationProto(),
+						synth.getManufacturer());
 				pp.setGsfId(api.getAndroidID());
 				if (api.getPassword() != null && !api.getPassword().isEmpty()) {
 					pp.setPassword(api.getPassword());

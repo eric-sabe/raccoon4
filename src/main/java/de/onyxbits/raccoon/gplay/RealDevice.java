@@ -176,12 +176,32 @@ public class RealDevice extends MockDevice {
 
 	@Override
 	public int getScreenWidth() {
-		return 0;
+		return device != null ? device.getScreenSize()[0] : 1080;
 	}
 
 	@Override
 	public int getScreenHeight() {
-		return 0;
+		return device != null ? device.getScreenSize()[1] : 2400;
+	}
+
+	@Override
+	public String getProductBoard() {
+		return device.getProperty("ro.product.board", getDevice());
+	}
+
+	@Override
+	public String getCarrier() {
+		return device.getProperty("ro.carrier", "Google");
+	}
+
+	@Override
+	public String getRadio() {
+		return device.getProperty("gsm.version.baseband", UNKNOWN);
+	}
+
+	@Override
+	public String getClientIdBase() {
+		return device.getProperty("ro.com.google.clientidbase", "android-google");
 	}
 
 	@Override

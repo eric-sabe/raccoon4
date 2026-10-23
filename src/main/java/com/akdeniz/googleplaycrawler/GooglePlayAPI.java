@@ -167,10 +167,19 @@ public class GooglePlayAPI {
 	 * 
 	 */
 	public AndroidCheckinResponse checkin() throws Exception {
+		return checkin(Utils.generateAndroidCheckinRequest());
+	}
+
+	/**
+	 * Performs two-step DummyDroid checkin using a custom
+	 * {@link AndroidCheckinRequest} hardware/software profile.
+	 */
+	public AndroidCheckinResponse checkin(AndroidCheckinRequest template)
+			throws Exception {
 
 		// this first checkin is for generating android-id
-		AndroidCheckinResponse checkinResponse = postCheckin(Utils
-				.generateAndroidCheckinRequest().toByteArray());
+		AndroidCheckinResponse checkinResponse = postCheckin(
+				template.toByteArray());
 		this.setAndroidID(BigInteger.valueOf(checkinResponse.getGsfId()).toString(
 				16));
 		setSecurityToken((BigInteger.valueOf(checkinResponse.getSecurityToken())
@@ -181,7 +190,7 @@ public class GooglePlayAPI {
 		// String c2dmAuth= getToken();
 
 		AndroidCheckinRequest.Builder checkInbuilder = AndroidCheckinRequest
-				.newBuilder(Utils.generateAndroidCheckinRequest());
+				.newBuilder(template);
 
 		AndroidCheckinRequest build = checkInbuilder
 				.setId(new BigInteger(this.getAndroidID(), 16).longValue())
@@ -257,6 +266,13 @@ public class GooglePlayAPI {
 	 */
 	public String loginAC2DM() throws IOException {
 		String cred = Identity.normalizeCredential(this.password);
+		if (cred.startsWith("ya29.") || cred.startsWith("g.a000")) {
+			return cred;
+		}
+		if (this.token != null && (this.token.startsWith("ya29.")
+				|| this.token.startsWith("g.a000"))) {
+			return this.token;
+		}
 		if (cred.startsWith("oauth2_4/")) {
 			Identity ident = Identity.signIn(getClient(), this.getEmail(), cred);
 			if (ident.getMasterToken() != null) {
@@ -578,10 +594,20 @@ public class GooglePlayAPI {
 	 * @see https://play.google.com/store/account
 	 */
 	public UploadDeviceConfigResponse uploadDeviceConfig() throws Exception {
+		return uploadDeviceConfig(Utils.getDeviceConfigurationProto(), "Google");
+	}
+
+	/**
+	 * Uploads a custom {@link DeviceConfigurationProto} to Google Play.
+	 */
+	public UploadDeviceConfigResponse uploadDeviceConfig(
+			com.akdeniz.googleplaycrawler.GooglePlay.DeviceConfigurationProto deviceConfig,
+			String manufacturer) throws Exception {
 
 		UploadDeviceConfigRequest request = UploadDeviceConfigRequest.newBuilder()
-				.setDeviceConfiguration(Utils.getDeviceConfigurationProto())
-				.setManufacturer("Samsung").build();
+				.setDeviceConfiguration(deviceConfig)
+				.setManufacturer(manufacturer != null ? manufacturer : "Google")
+				.build();
 		ResponseWrapper responseWrapper = executePOSTRequest(
 				UPLOADDEVICECONFIG_URL, request.toByteArray(), "application/x-protobuf");
 		return responseWrapper.getPayload().getUploadDeviceConfigResponse();

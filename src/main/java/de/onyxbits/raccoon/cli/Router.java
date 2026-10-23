@@ -108,8 +108,24 @@ public class Router {
 		options.addOption(playUpdate);
 		
 		Option playNewGsfId = new Option(null, "gp-renew-gsfid", false,
-				"Register a new GSF ID");
+				"Register a new GSF ID using DummyDroid");
 		options.addOption(playNewGsfId);
+
+		Option dummyDroid = Option
+				.builder()
+				.longOpt("dummydroid")
+				.optionalArg(true)
+				.hasArg()
+				.argName("file.properties")
+				.desc(
+						"Generate and register a synthetic DummyDroid device & GSF ID (no physical phone required)")
+				.build();
+		options.addOption(dummyDroid);
+
+		Option dummyDroidDump = new Option(null, "dummydroid-dump", true,
+				"Export a DummyDroid .properties profile (from connected phone or built-in preset)");
+		dummyDroidDump.setArgName("file.properties");
+		options.addOption(dummyDroidDump);
 
 		Option playSetup = Option
 				.builder()
@@ -232,6 +248,15 @@ public class Router {
 		
 		if (commandLine.hasOption(playNewGsfId.getLongOpt())) {
 			Play.registerNewGsfId();
+		}
+
+		if (commandLine.hasOption(dummyDroid.getLongOpt())) {
+			Play.dummyDroid(commandLine.getOptionValue(dummyDroid.getLongOpt()));
+		}
+
+		if (commandLine.hasOption(dummyDroidDump.getLongOpt())) {
+			Play.dummyDroidDump(
+					commandLine.getOptionValue(dummyDroidDump.getLongOpt()).trim());
 		}
 
 		if (commandLine.hasOption(playSetup.getLongOpt())) {

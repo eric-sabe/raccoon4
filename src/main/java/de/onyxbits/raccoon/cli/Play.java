@@ -23,6 +23,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -43,6 +44,7 @@ import de.onyxbits.raccoon.gplay.PlayManager;
 import de.onyxbits.raccoon.gplay.PlayProfile;
 import de.onyxbits.raccoon.gplay.PlayProfileDao;
 import de.onyxbits.raccoon.gplay.RealDevice;
+import de.onyxbits.raccoon.gplay.SyntheticDevice;
 import de.onyxbits.raccoon.ptools.BridgeManager;
 import de.onyxbits.raccoon.ptools.Device;
 import de.onyxbits.raccoon.repo.AndroidApp;
@@ -470,32 +472,88 @@ class Play implements Variables {
 	}
 
 	public static void registerNewGsfId() {
+		dummyDroid(null);
+	}
+
+	/**
+	 * Register a new synthetic DummyDroid device profile and GSF ID with Google
+	 * Play without requiring a physical Android phone.
+	 * 
+	 * @param propertiesPath
+	 *          optional path to a DummyDroid .properties or Android build.prop
+	 *          file (uses built-in Pixel 7a profile if null/empty)
+	 */
+	public static void dummyDroid(String propertiesPath) {
 		PlayProfile pp = getProfile();
-
-		if (pp.getAgent() == null) {
-			// TODO: rewrite the GooglePlayAPI. The whole device config stuff is
-			// hardcoded and poorly exposed.
-			pp.setAgent(new GooglePlayAPI("", "").getUseragent());
-		}
-
-		GooglePlayAPI api = PlayManager.createConnection(pp);
-		api.setClient(LoginLogic.createLoginClient());
 		try {
-			String tmp = pp.getAlias() + ": " + pp.getGsfId();
-			api.checkin(); // Generates the GSF ID
-			// api.login();
-			api.uploadDeviceConfig();
+			SyntheticDevice synth = (propertiesPath != null
+					&& !propertiesPath.trim().isEmpty())
+							? SyntheticDevice.fromFile(new File(propertiesPath.trim()))
+							: SyntheticDevice.createDefault();
+			pp.setAgent(synth.toFinskyUserAgent());
+
+			GooglePlayAPI api = PlayManager.createConnection(pp);
+			api.setClient(LoginLogic.createLoginClient());
+
+			String oldGsf = pp.getGsfId();
+			api.checkin(synth.toAndroidCheckinRequest());
+			api.uploadDeviceConfig(synth.toDeviceConfigurationProto(),
+					synth.getManufacturer());
 			pp.setGsfId(api.getAndroidID());
 			if (api.getPassword() != null && !api.getPassword().isEmpty()) {
 				pp.setPassword(api.getPassword());
 			}
 			getDatabase().get(PlayProfileDao.class).update(pp);
-			tmp = tmp + " -> " + pp.getGsfId();
-			Thread.sleep(6000);
-			System.out.println(tmp);
+			System.out.println("DummyDroid registered synthetic device '"
+					+ synth.getManufacturer() + " " + synth.getModel() + " (Android "
+					+ synth.getReleaseVersion() + ")' for profile '" + pp.getAlias()
+					+ "': " + oldGsf + " -> " + pp.getGsfId());
 		}
 		catch (Exception e) {
 			e.printStackTrace();
+			Router.fail("play.exception", e.getMessage());
+		}
+	}
+
+	/**
+	 * Export a DummyDroid .properties profile to disk (from a connected phone if
+	 * available, or from the built-in DummyDroid preset otherwise).
+	 */
+	public static void dummyDroidDump(String outputPath) {
+		try {
+			de.onyxbits.raccoon.gplay.MockDevice source = null;
+			try {
+				BridgeManager bm = GlobalsProvider.getGlobals().get(BridgeManager.class);
+				for (Device d : bm.listDevices()) {
+					if (d.isAuthorized()) {
+						source = new RealDevice(d, "53.6.15-34", 85361540);
+						System.out.println(
+								"Exporting DummyDroid profile from connected phone: "
+										+ d.getSerial());
+						break;
+					}
+				}
+			}
+			catch (Exception e) {
+			}
+			if (source == null) {
+				source = SyntheticDevice.createDefault();
+				System.out.println(
+						"Exporting built-in DummyDroid profile (Google Pixel 7a)");
+			}
+			File out = new File(outputPath);
+			PrintWriter pw = new PrintWriter(new FileWriter(out));
+			try {
+				SyntheticDevice.convert(source, pw);
+			}
+			finally {
+				pw.close();
+			}
+			System.out.println("Saved DummyDroid properties to: "
+					+ out.getAbsolutePath());
+		}
+		catch (Exception e) {
+			Router.fail("play.exception", e.getMessage());
 		}
 	}
 
@@ -553,8 +611,9 @@ class Play implements Variables {
 			pp.setGsfId(detectedGsf);
 		}
 
+		SyntheticDevice synth = SyntheticDevice.createDefault();
 		if (pp.getAgent() == null) {
-			pp.setAgent(new GooglePlayAPI("", "").getUseragent());
+			pp.setAgent(synth.toFinskyUserAgent());
 		}
 
 		GooglePlayAPI api = PlayManager.createConnection(pp);
@@ -566,9 +625,10 @@ class Play implements Variables {
 				pp.setPassword(api.getPassword());
 			}
 			if (pp.getGsfId() == null || pp.getGsfId().isEmpty()) {
-				api.checkin();
+				api.checkin(synth.toAndroidCheckinRequest());
 				api.login();
-				api.uploadDeviceConfig();
+				api.uploadDeviceConfig(synth.toDeviceConfigurationProto(),
+						synth.getManufacturer());
 				pp.setGsfId(api.getAndroidID());
 			}
 			if (isNew) {

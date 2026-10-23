@@ -15,10 +15,14 @@
  */
 package de.onyxbits.raccoon.gplay;
 
-import java.text.MessageFormat;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
+import java.util.TimeZone;
 
+import com.akdeniz.googleplaycrawler.GooglePlay.AndroidBuildProto;
+import com.akdeniz.googleplaycrawler.GooglePlay.AndroidCheckinProto;
+import com.akdeniz.googleplaycrawler.GooglePlay.AndroidCheckinRequest;
 import com.akdeniz.googleplaycrawler.GooglePlay.DeviceConfigurationProto;
 
 public abstract class MockDevice {
@@ -80,18 +84,126 @@ public abstract class MockDevice {
 
 	public abstract List<String> getSystemFeatures();
 
-	public DeviceConfigurationProto toDeviceConfigurationProto() {
-		return DeviceConfigurationProto.newBuilder().
-				setHasFiveWayNavigation(false).setGlEsVersion(getGlEsVersion()).setHasHardKeyboard(false).setKeyboard(1).
-				build();
-	}
-
 	public String getModel() {
 		return getDevice();
 	}
 
 	public String getReleaseVersion() {
-		return "14";
+		return "15";
+	}
+
+	public String getProductBoard() {
+		return getDevice();
+	}
+
+	public String getCarrier() {
+		return "Google";
+	}
+
+	public String getRadio() {
+		return UNKNOWN;
+	}
+
+	public String getClientIdBase() {
+		return "android-google";
+	}
+
+	public String getLocale() {
+		return "en_US";
+	}
+
+	public String getTimeZone() {
+		String tz = TimeZone.getDefault().getID();
+		return (tz != null && !tz.isEmpty()) ? tz : "America/New_York";
+	}
+
+	public String getCellOperator() {
+		return "310260";
+	}
+
+	public String getSimOperator() {
+		return "310260";
+	}
+
+	/**
+	 * Build a complete Google Play {@link DeviceConfigurationProto} from this
+	 * mock device (DummyDroid equivalent).
+	 */
+	public DeviceConfigurationProto toDeviceConfigurationProto() {
+		DeviceConfigurationProto.Builder b = DeviceConfigurationProto.newBuilder()
+				.setTouchScreen(3)
+				.setKeyboard(1)
+				.setNavigation(1)
+				.setScreenLayout(2)
+				.setHasHardKeyboard(false)
+				.setHasFiveWayNavigation(false)
+				.setScreenDensity(getScreenDensity() > 0 ? getScreenDensity() : 420)
+				.setScreenWidth(getScreenWidth() > 0 ? getScreenWidth() : 1080)
+				.setScreenHeight(getScreenHeight() > 0 ? getScreenHeight() : 2400)
+				.setGlEsVersion(getGlEsVersion() > 0 ? getGlEsVersion() : 196610);
+
+		if (getSharedLibraries() != null && !getSharedLibraries().isEmpty()) {
+			b.addAllSystemSharedLibrary(getSharedLibraries());
+		}
+		if (getSystemFeatures() != null && !getSystemFeatures().isEmpty()) {
+			b.addAllSystemAvailableFeature(getSystemFeatures());
+		}
+		if (getNativePlatforms() != null && !getNativePlatforms().isEmpty()) {
+			b.addAllNativePlatform(getNativePlatforms());
+		}
+		if (getSupportedLocales() != null && !getSupportedLocales().isEmpty()) {
+			b.addAllSystemSupportedLocale(getSupportedLocales());
+		}
+		return b.build();
+	}
+
+	/**
+	 * Build a complete Google Play {@link AndroidCheckinRequest} from this mock
+	 * device (DummyDroid FormData.assemble() equivalent).
+	 */
+	public AndroidCheckinRequest toAndroidCheckinRequest() {
+		AndroidBuildProto.Builder buildProto = AndroidBuildProto.newBuilder()
+				.setId(getFingerprint() != null ? getFingerprint() : UNKNOWN)
+				.setProduct(getProductBoard() != null ? getProductBoard() : getDevice())
+				.setCarrier(getCarrier() != null ? getCarrier() : "Google")
+				.setRadio(getRadio() != null ? getRadio() : UNKNOWN)
+				.setBootloader(getBootloader() != null ? getBootloader() : UNKNOWN)
+				.setClient(
+						getClientIdBase() != null ? getClientIdBase() : "android-google")
+				.setTimestamp(new Date().getTime() / 1000)
+				.setGoogleServices(getSdkVersion() > 0 ? getSdkVersion() : 35)
+				.setDevice(getDevice() != null ? getDevice() : UNKNOWN)
+				.setSdkVersion(getSdkVersion() > 0 ? getSdkVersion() : 35)
+				.setModel(getModel() != null ? getModel() : UNKNOWN)
+				.setManufacturer(
+						getManufacturer() != null ? getManufacturer() : "Google")
+				.setBuildProduct(
+						getBuildProduct() != null ? getBuildProduct() : getDevice())
+				.setOtaInstalled(false);
+
+		AndroidCheckinProto.Builder checkinProto = AndroidCheckinProto.newBuilder()
+				.setBuild(buildProto)
+				.setLastCheckinMsec(0)
+				.setRoaming("mobile-notroaming")
+				.setUserNumber(0);
+
+		if (getCellOperator() != null && !getCellOperator().isEmpty()) {
+			checkinProto.setCellOperator(getCellOperator());
+		}
+		if (getSimOperator() != null && !getSimOperator().isEmpty()) {
+			checkinProto.setSimOperator(getSimOperator());
+		}
+
+		AndroidCheckinRequest.Builder req = AndroidCheckinRequest.newBuilder()
+				.setId(0)
+				.setCheckin(checkinProto)
+				.setLocale(getLocale() != null ? getLocale() : "en_US")
+				.setTimeZone(getTimeZone() != null ? getTimeZone() : "America/New_York")
+				.setVersion(3)
+				.setDeviceConfiguration(toDeviceConfigurationProto())
+				.setFragment(0);
+
+		return req.build();
 	}
 
 	/**
@@ -113,10 +225,12 @@ public abstract class MockDevice {
 		if (abiStr.length() == 0) {
 			abiStr.append("arm64-v8a;armeabi-v7a;armeabi");
 		}
+		String safeModel = getModel() != null ? getModel().replace(' ', '_')
+				: getDevice();
 		return String.format(
 				"Android-Finsky/%s (api=3,versionCode=%d,sdk=%d,device=%s,hardware=%s,product=%s,platformVersionRelease=%s,model=%s,buildId=%s,isWideScreen=0,supportedAbis=%s)",
 				getFinskyVersion(), getFinskyVersionCode(), getSdkVersion(),
 				getDevice(), getHardware(), getBuildProduct(), getReleaseVersion(),
-				getModel(), getBuildId(), abiStr.toString());
+				safeModel, getBuildId(), abiStr.toString());
 	}
 }
