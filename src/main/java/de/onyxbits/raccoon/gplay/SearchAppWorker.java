@@ -65,20 +65,32 @@ class SearchAppWorker extends SwingWorker<SearchEngineResultPage, Object> {
 
 	@Override
 	protected SearchEngineResultPage doInBackground() throws Exception {
+		try {
+			return runSearch();
+		}
+		catch (Exception e) {
+			owner.login();
+			this.api = owner.createConnection();
+			return runSearch();
+		}
+	}
+
+	private SearchEngineResultPage runSearch() throws Exception {
 		String tmp = null;
 		if (serp != null) {
 			tmp = serp.getNextPageUrl();
 		}
-		serp = new SearchEngineResultPage(SearchEngineResultPage.SEARCH);
+		SearchEngineResultPage res = new SearchEngineResultPage(
+				SearchEngineResultPage.SEARCH);
 		if (query != null) {
-			serp.append(api.searchApp(query));
-			tmp = serp.getNextPageUrl();
+			res.append(api.searchApp(query));
+			tmp = res.getNextPageUrl();
 		}
 		if (tmp != null && !"".equals(tmp)) {
-			serp.append(api.getList(tmp));
+			res.append(api.getList(tmp));
 		}
 
-		return serp;
+		return res;
 	}
 
 	@Override

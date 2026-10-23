@@ -35,6 +35,7 @@ import com.akdeniz.googleplaycrawler.GooglePlay.BulkDetailsEntry;
 import com.akdeniz.googleplaycrawler.GooglePlay.BulkDetailsResponse;
 import com.akdeniz.googleplaycrawler.GooglePlay.DetailsResponse;
 import com.akdeniz.googleplaycrawler.GooglePlayAPI;
+import com.akdeniz.googleplaycrawler.GooglePlayException;
 
 import de.onyxbits.raccoon.db.DatabaseManager;
 import de.onyxbits.raccoon.db.VariableDao;
@@ -96,6 +97,16 @@ class Play implements Variables {
 		return ret;
 	}
 
+	private static boolean isAuthFailure(Exception e) {
+		if (e instanceof GooglePlayException
+				&& ((GooglePlayException) e).getHttpStatus() == 401) {
+			return true;
+		}
+		String msg = e.getMessage();
+		return msg != null
+				&& (msg.contains("Unauthorized") || msg.contains("DF-DFERH-01"));
+	}
+
 	/**
 	 * Perform a details query, print the raw results to stdout
 	 * 
@@ -108,8 +119,7 @@ class Play implements Variables {
 			System.out.println(api.details(name));
 		}
 		catch (Exception e) {
-			if (e.getMessage() != null && e.getMessage().contains("Unauthorized")
-					&& refreshFromConnectedPhone()) {
+			if (isAuthFailure(e) && refreshFromStoredOrConnectedPhone()) {
 				try {
 					System.out.println(createConnection().details(name));
 					return;
@@ -118,7 +128,7 @@ class Play implements Variables {
 					e = e2;
 				}
 			}
-			Router.fail("play.exception", e.getMessage());
+			failWithAuthHintIfApplicable(e);
 		}
 	}
 
@@ -128,8 +138,7 @@ class Play implements Variables {
 			System.out.println(api.search(query));
 		}
 		catch (Exception e) {
-			if (e.getMessage() != null && e.getMessage().contains("Unauthorized")
-					&& refreshFromConnectedPhone()) {
+			if (isAuthFailure(e) && refreshFromStoredOrConnectedPhone()) {
 				try {
 					System.out.println(createConnection().search(query));
 					return;
@@ -138,7 +147,7 @@ class Play implements Variables {
 					e = e2;
 				}
 			}
-			Router.fail("play.exception", e.getMessage());
+			failWithAuthHintIfApplicable(e);
 		}
 	}
 
@@ -191,7 +200,17 @@ class Play implements Variables {
 			res = api.bulkDetails(tmp);
 		}
 		catch (IOException e) {
-			Router.fail("play.exception", e.getMessage());
+			if (isAuthFailure(e) && refreshFromStoredOrConnectedPhone()) {
+				try {
+					res = createConnection().bulkDetails(tmp);
+				}
+				catch (IOException e2) {
+					failWithAuthHintIfApplicable(e2);
+				}
+			}
+			else {
+				failWithAuthHintIfApplicable(e);
+			}
 		}
 
 		try {
@@ -252,8 +271,7 @@ class Play implements Variables {
 				dr = api.details(doc);
 			}
 			catch (IOException e) {
-				if (e.getMessage() != null && e.getMessage().contains("Unauthorized")
-						&& refreshFromConnectedPhone()) {
+				if (isAuthFailure(e) && refreshFromStoredOrConnectedPhone()) {
 					api = createConnection();
 					dr = api.details(doc);
 				}
@@ -268,7 +286,7 @@ class Play implements Variables {
 			}
 		}
 		catch (IOException e) {
-			Router.fail("play.exception", e.getMessage());
+			failWithAuthHintIfApplicable(e);
 		}
 
 		DownloadData data = null;
@@ -393,7 +411,19 @@ class Play implements Variables {
 		}
 		GooglePlayAPI api = createConnection();
 		try {
-			BulkDetailsResponse response = api.bulkDetails(pns);
+			BulkDetailsResponse response;
+			try {
+				response = api.bulkDetails(pns);
+			}
+			catch (IOException e) {
+				if (isAuthFailure(e) && refreshFromStoredOrConnectedPhone()) {
+					api = createConnection();
+					response = api.bulkDetails(pns);
+				}
+				else {
+					throw e;
+				}
+			}
 			List<BulkDetailsEntry> bde = response.getEntryList();
 			for (BulkDetailsEntry entry : bde) {
 				AppDetails ad = entry.getDoc().getDetails().getAppDetails();
@@ -415,9 +445,54 @@ class Play implements Variables {
 			}
 		}
 		catch (IOException e) {
-			Router.fail(e.getMessage());
-			e.printStackTrace();
+			failWithAuthHintIfApplicable(e);
 		}
+	}
+
+	private static void failWithAuthHintIfApplicable(Exception e) {
+		if (isAuthFailure(e)) {
+			DatabaseManager dbm = getDatabase();
+			String alias = System.getProperty(PLAYPROFILESYSPROP,
+					dbm.get(VariableDao.class).getVar(PLAYPROFILE, null));
+			PlayProfile pp = dbm.get(PlayProfileDao.class).get(alias);
+			if (pp != null && pp.getPassword() != null
+					&& pp.getPassword().startsWith("ya29.")) {
+				System.err.println(
+						"Authentication token expired (HTTP 401 / DF-DFERH-01): The short-lived OAuth2 access token (ya29.*) imported from the phone expires after 1 hour.\n"
+								+ "To run Raccoon permanently without the phone connected, set a 16-character Google App Password (from https://myaccount.google.com/apppasswords) or an oauth2_4/... token:\n"
+								+ "  java -jar build/libs/Raccoon-desktop-4.25.0.jar --gp-setup \""
+								+ pp.getUser() + ",<16_char_app_password>\"");
+				System.exit(1);
+			}
+		}
+		Router.fail("play.exception", e.getMessage());
+	}
+
+	private static boolean refreshFromStoredOrConnectedPhone() {
+		try {
+			DatabaseManager dbm = getDatabase();
+			String alias = System.getProperty(PLAYPROFILESYSPROP,
+					dbm.get(VariableDao.class).getVar(PLAYPROFILE, null));
+			PlayProfile pp = dbm.get(PlayProfileDao.class).get(alias);
+			if (pp != null && pp.getPassword() != null
+					&& !pp.getPassword().trim().isEmpty()
+					&& !pp.getPassword().startsWith("ya29.")) {
+				GooglePlayAPI api = PlayManager.createConnection(pp);
+				api.setClient(LoginLogic.createLoginClient());
+				api.login();
+				if (api.getToken() != null && !api.getToken().isEmpty()) {
+					pp.setToken(api.getToken());
+					if (api.getPassword() != null && !api.getPassword().isEmpty()) {
+						pp.setPassword(api.getPassword());
+					}
+					dbm.get(PlayProfileDao.class).update(pp);
+					return true;
+				}
+			}
+		}
+		catch (Exception e) {
+		}
+		return refreshFromConnectedPhone();
 	}
 
 	private static boolean refreshFromConnectedPhone() {

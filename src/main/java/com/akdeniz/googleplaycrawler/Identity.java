@@ -44,7 +44,8 @@ class Identity {
 
 	private static final String LOGIN_URL = "https://android.clients.google.com/auth";
 	private static final String PUBKEY = "AAAAgMom/1a/v0lblO2Ubrt60J2gcuXSljGFQXgcyZWveWLEwo6prwgi3iJIZdodyhKZQrNWp5nKJ3srRXcUW+F1BD3baEVGcmEgqaLZUNBjm057pKRI16kB0YppeGx5qIQ5QjKzsR8ETQbKLNWgRY0QRNVz34kMJR3P/LgHax/6rmf5AAAAAwEAAQ==";
-	private static final String SERVICE = "androidmarket";
+	private static final String SERVICE = "oauth2:https://www.googleapis.com/auth/googleplay";
+	private static final String FALLBACK_SERVICE = "androidmarket";
 	private static final String CLIENT_SIG = "38918a453d07199354f8b19af05ec6562ced5788";
 
 	private String firstName;
@@ -226,7 +227,8 @@ class Identity {
 		}
 		ret.masterToken = discoveredMasterToken;
 
-		if (tok != null && tok.length() > 0 && !cred.startsWith("aas_et/")) {
+		if (tok != null && tok.length() > 0 && !cred.startsWith("aas_et/")
+				&& (ret.authToken == null || !ret.authToken.startsWith("ya29."))) {
 			// Since mid Oct/2017, "Token" must be sent back if account details
 			// (first-, lastname, services) are requested by "add_account".
 			// Otherwise the "Auth" cookie will have a short TTL.
@@ -235,7 +237,7 @@ class Identity {
 					+ map.get("Auth")));
 			params.add(new BasicNameValuePair("Token", tok));
 			params.add(new BasicNameValuePair("token_request_options", "CAA4AQ=="));
-			params.add(new BasicNameValuePair("service", SERVICE));
+			params.add(new BasicNameValuePair("service", FALLBACK_SERVICE));
 			params.add(new BasicNameValuePair("accountType", "HOSTED_OR_GOOGLE"));
 			params.add(new BasicNameValuePair("app", "com.android.vending"));
 			params.add(new BasicNameValuePair("client_sig", CLIENT_SIG));
