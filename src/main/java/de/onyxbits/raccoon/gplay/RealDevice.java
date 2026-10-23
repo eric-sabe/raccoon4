@@ -47,8 +47,12 @@ public class RealDevice extends MockDevice {
 	 */
 	public RealDevice(Device device, String versionName, int versionCode) {
 		this.device = device;
-		this.versionName = versionName;
-		this.versionCode = versionCode;
+		String devVerName = device != null ? device.getPlayStoreVersionName()
+				: null;
+		int devVerCode = device != null ? device.getPlayStoreVersionCode() : -1;
+		this.versionName = (devVerName != null && !devVerName.isEmpty()) ? devVerName
+				: versionName;
+		this.versionCode = (devVerCode > 0) ? devVerCode : versionCode;
 	}
 
 	@Override
@@ -95,6 +99,16 @@ public class RealDevice extends MockDevice {
 	@Override
 	public String getBuildType() {
 		return device.getProperty("ro.build.type", UNKNOWN);
+	}
+
+	@Override
+	public String getModel() {
+		return device.getProperty("ro.product.model", getDevice());
+	}
+
+	@Override
+	public String getReleaseVersion() {
+		return device.getProperty("ro.build.version.release", "14");
 	}
 
 	@Override

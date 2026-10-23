@@ -20,17 +20,24 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.util.List;
 
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.JButton;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.event.CaretEvent;
 import javax.swing.event.CaretListener;
 
 import de.onyxbits.raccoon.gplay.PlayProfile;
+import de.onyxbits.raccoon.gplay.RealDevice;
 import de.onyxbits.raccoon.gui.HyperTextPane;
+import de.onyxbits.raccoon.ptools.BridgeManager;
+import de.onyxbits.raccoon.ptools.Device;
+import de.onyxbits.raccoon.repo.Layout;
 
 /**
  * For entering the parameters of an existing device.
@@ -43,6 +50,7 @@ public class MimicLogic extends WizardBuilder implements CaretListener,
 
 	private JTextField gsfId;
 	private JTextField userAgent;
+	private JButton detectPhone;
 
 	@Override
 	protected JPanel assemble() {
@@ -53,11 +61,13 @@ public class MimicLogic extends WizardBuilder implements CaretListener,
 		gsfId.setMargin(new Insets(2, 2, 2, 2));
 		userAgent = new JTextField(20);
 		userAgent.setMargin(new Insets(2, 2, 2, 2));
+		detectPhone = new JButton("Read from Connected Phone (ADB)");
 		HyperTextPane about = new HyperTextPane(
 				Messages.getString("ExistingLogic.about")).withWidth(500)
 				.withTransparency();
 		gsfId.addActionListener(this);
 		userAgent.addActionListener(this);
+		detectPhone.addActionListener(this);
 		gsfId.addCaretListener(this);
 		userAgent.addCaretListener(this);
 
@@ -84,6 +94,11 @@ public class MimicLogic extends WizardBuilder implements CaretListener,
 		gbc.gridy = 1;
 		container.add(userAgent, gbc);
 
+		gbc.gridx = 1;
+		gbc.gridy = 2;
+		gbc.insets.top = 6;
+		container.add(detectPhone, gbc);
+
 		panel.add(about);
 		panel.add(Box.createVerticalStrut(20));
 		panel.add(container);
@@ -92,8 +107,65 @@ public class MimicLogic extends WizardBuilder implements CaretListener,
 		return panel;
 	}
 
+	private void detectFromConnectedPhone(boolean showDialogOnError) {
+		try {
+			BridgeManager bm = new BridgeManager(globals.get(Layout.class));
+			bm.startup();
+			List<Device> devices = bm.listDevices();
+			bm.shutdown();
+			if (devices.isEmpty()) {
+				if (showDialogOnError) {
+					JOptionPane.showMessageDialog(detectPhone,
+							"No Android device detected over ADB.\nMake sure the phone is connected via USB and USB Debugging is enabled.",
+							"No Device Found", JOptionPane.WARNING_MESSAGE);
+				}
+				return;
+			}
+			Device target = null;
+			for (Device d : devices) {
+				if (d.isAuthorized()) {
+					target = d;
+					break;
+				}
+			}
+			if (target == null) {
+				Device d = devices.get(0);
+				if (showDialogOnError) {
+					JOptionPane.showMessageDialog(detectPhone,
+							"Phone " + d.getSerial() + " is connected, but its status is '"
+									+ d.getState()
+									+ "'.\nPlease unlock your phone screen and tap 'Allow' on the 'Allow USB debugging?' prompt, then try again.",
+							"Device Unauthorized", JOptionPane.WARNING_MESSAGE);
+				}
+				return;
+			}
+
+			RealDevice rd = new RealDevice(target, "41.2.29-31", 84122930);
+			userAgent.setText(rd.toFinskyUserAgent());
+			String detectedGsf = target.getGsfId();
+			if (detectedGsf != null && !detectedGsf.isEmpty()) {
+				gsfId.setText(detectedGsf);
+			}
+			updateNextButton();
+		}
+		catch (Exception err) {
+			if (showDialogOnError) {
+				JOptionPane.showMessageDialog(detectPhone,
+						"Failed to query device over ADB: " + err.getMessage(),
+						"ADB Error", JOptionPane.ERROR_MESSAGE);
+			}
+		}
+	}
+
+	private void updateNextButton() {
+		next.setEnabled(userAgent.getText().trim().length() > 0);
+	}
+
 	@Override
 	public void actionPerformed(ActionEvent e) {
+		if (e.getSource() == detectPhone) {
+			detectFromConnectedPhone(true);
+		}
 		if (e.getSource() == gsfId) {
 			userAgent.requestFocusInWindow();
 		}
@@ -105,24 +177,26 @@ public class MimicLogic extends WizardBuilder implements CaretListener,
 	@Override
 	protected void onActivate() {
 		PlayProfile pp = globals.get(PlayProfile.class);
-		gsfId.setText(pp.getGsfId());
-		userAgent.setText(pp.getAgent());
+		gsfId.setText(pp.getGsfId() != null ? pp.getGsfId() : "");
+		userAgent.setText(pp.getAgent() != null ? pp.getAgent() : "");
+		if (userAgent.getText().trim().isEmpty()) {
+			detectFromConnectedPhone(false);
+		}
 		previous.setEnabled(true);
-		next.setEnabled(gsfId.getText().length() > 0
-				&& userAgent.getText().length() > 0);
+		updateNextButton();
 	}
 
 	@Override
 	public void caretUpdate(CaretEvent e) {
-		next.setEnabled(gsfId.getText().length() > 0
-				&& userAgent.getText().length() > 0);
+		updateNextButton();
 	}
 
 	@Override
 	protected void onNext() {
 		PlayProfile pp = globals.get(PlayProfile.class);
-		pp.setAgent(userAgent.getText());
-		pp.setGsfId(gsfId.getText());
+		pp.setAgent(userAgent.getText().trim());
+		String gsf = gsfId.getText().trim();
+		pp.setGsfId(gsf.isEmpty() ? null : gsf);
 		show(UploadLogic.class);
 	}
 

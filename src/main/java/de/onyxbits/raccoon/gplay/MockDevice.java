@@ -86,17 +86,37 @@ public abstract class MockDevice {
 				build();
 	}
 
+	public String getModel() {
+		return getDevice();
+	}
+
+	public String getReleaseVersion() {
+		return "14";
+	}
+
 	/**
 	 * Create the user agent string of the play client app
 	 * 
 	 * @return user agent string
 	 */
 	public String toFinskyUserAgent() {
-		MessageFormat tmpl = new MessageFormat(
-				"Android-Finsky/{0} (versionCode={1},sdk={2},device={3},hardware={4},product={5},build={6}:{7})");
-		String[] args = { getFinskyVersion(), getFinskyVersionCode() + "",
-				getSdkVersion() + "", getBuildProduct(), getDevice(), getHardware(),
-				getBuildProduct(), getBuildId(), getBuildType() };
-		return tmpl.format(args);
+		List<String> abis = getNativePlatforms();
+		StringBuilder abiStr = new StringBuilder();
+		if (abis != null) {
+			for (int i = 0; i < abis.size(); i++) {
+				if (i > 0) {
+					abiStr.append(';');
+				}
+				abiStr.append(abis.get(i));
+			}
+		}
+		if (abiStr.length() == 0) {
+			abiStr.append("arm64-v8a;armeabi-v7a;armeabi");
+		}
+		return String.format(
+				"Android-Finsky/%s (api=3,versionCode=%d,sdk=%d,device=%s,hardware=%s,product=%s,platformVersionRelease=%s,model=%s,buildId=%s,isWideScreen=0,supportedAbis=%s)",
+				getFinskyVersion(), getFinskyVersionCode(), getSdkVersion(),
+				getDevice(), getHardware(), getBuildProduct(), getReleaseVersion(),
+				getModel(), getBuildId(), abiStr.toString());
 	}
 }

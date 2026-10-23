@@ -32,7 +32,10 @@ import javax.swing.event.CaretEvent;
 import javax.swing.event.CaretListener;
 
 import de.onyxbits.raccoon.gplay.PlayProfile;
+import de.onyxbits.raccoon.gplay.RealDevice;
 import de.onyxbits.raccoon.gui.HyperTextPane;
+import de.onyxbits.raccoon.ptools.BridgeManager;
+import de.onyxbits.raccoon.ptools.Device;
 
 /**
  * Handles credentials
@@ -118,7 +121,34 @@ public class AccountLogic extends WizardBuilder implements ActionListener,
 
 	@Override
 	public void onActivate() {
-		username.setText(globals.get(PlayProfile.class).getUser());
+		PlayProfile pp = globals.get(PlayProfile.class);
+		username.setText(pp.getUser());
+		try {
+			BridgeManager bm = globals.get(BridgeManager.class);
+			Device dev = bm != null ? bm.getActiveDevice() : null;
+			if (dev != null && dev.isAuthorized()) {
+				if (username.getText() == null || username.getText().trim().isEmpty()) {
+					String email = dev.getGoogleAccountEmail();
+					if (email != null && !email.isEmpty()) {
+						username.setText(email);
+					}
+				}
+				if (password.getPassword().length == 0) {
+					String tok = dev.getGooglePlayToken(false);
+					if (tok != null && !tok.isEmpty()) {
+						password.setText(tok);
+					}
+				}
+				String gsf = dev.getGsfId();
+				if (gsf != null && !gsf.isEmpty()) {
+					pp.setGsfId(gsf);
+				}
+				pp.setAgent(new RealDevice(dev, "41.2.29-31", 84122930)
+						.toFinskyUserAgent());
+			}
+		}
+		catch (Exception e) {
+		}
 		previous.setEnabled(false);
 		next.setEnabled(username.getText().length() > 0
 				&& password.getPassword().length > 0);

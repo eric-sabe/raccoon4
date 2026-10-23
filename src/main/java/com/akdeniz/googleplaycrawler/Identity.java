@@ -45,14 +45,38 @@ class Identity {
 	private static final String LOGIN_URL = "https://android.clients.google.com/auth";
 	private static final String PUBKEY = "AAAAgMom/1a/v0lblO2Ubrt60J2gcuXSljGFQXgcyZWveWLEwo6prwgi3iJIZdodyhKZQrNWp5nKJ3srRXcUW+F1BD3baEVGcmEgqaLZUNBjm057pKRI16kB0YppeGx5qIQ5QjKzsR8ETQbKLNWgRY0QRNVz34kMJR3P/LgHax/6rmf5AAAAAwEAAQ==";
 	private static final String SERVICE = "androidmarket";
+	private static final String CLIENT_SIG = "38918a453d07199354f8b19af05ec6562ced5788";
 
 	private String firstName;
 	private String lastName;
 	private String email;
 	private String services;
 	private String authToken;
+	private String masterToken;
 
 	private Identity() {
+	}
+
+	/**
+	 * Long-lived AAS master token (aas_et/...) if returned or used during sign-in.
+	 */
+	public String getMasterToken() {
+		return masterToken;
+	}
+
+	/**
+	 * Normalize a password or token string (e.g. strip spaces from 16-char Google
+	 * App Passwords).
+	 */
+	public static String normalizeCredential(String pwd) {
+		if (pwd == null) {
+			return "";
+		}
+		String trimmed = pwd.trim();
+		if (trimmed.matches("[a-zA-Z0-9]{4}( +[a-zA-Z0-9]{4}){3}")) {
+			return trimmed.replaceAll("\\s+", "");
+		}
+		return trimmed;
 	}
 
 	/**
@@ -122,17 +146,53 @@ class Identity {
 			throws ClientProtocolException,
 			HttpResponseException, IOException {
 
-		
-		
 		Locale loc = Locale.getDefault();
-		String epwd = null;
-		try {
-			epwd = encryptString(uid + "\u0000" + pwd);
+		String cred = normalizeCredential(pwd);
+
+		if (cred.startsWith("ya29.") || cred.startsWith("weblogin:")) {
+			Identity direct = new Identity();
+			direct.email = uid;
+			direct.authToken = cred;
+			return direct;
 		}
-		catch (Exception e) {
-			// Should not happen unless the user is in a country with an embargo on
-			// cryptography. In which case, we are screwed anyway.
-			throw new RuntimeException("Could not encrypt password", e);
+
+		String discoveredMasterToken = null;
+		if (cred.startsWith("oauth2_4/")) {
+			List<NameValuePair> exchangeParams = new ArrayList<NameValuePair>();
+			exchangeParams.add(new BasicNameValuePair("Email", uid));
+			exchangeParams.add(new BasicNameValuePair("Token", cred));
+			exchangeParams.add(new BasicNameValuePair("ACCESS_TOKEN", "1"));
+			exchangeParams.add(new BasicNameValuePair("accountType", "HOSTED_OR_GOOGLE"));
+			exchangeParams.add(new BasicNameValuePair("has_permission", "1"));
+			exchangeParams.add(new BasicNameValuePair("add_account", "1"));
+			exchangeParams.add(new BasicNameValuePair("service", "ac2dm"));
+			exchangeParams.add(new BasicNameValuePair("source", "android"));
+			exchangeParams.add(new BasicNameValuePair("sdk_version", "33"));
+			exchangeParams.add(new BasicNameValuePair("client_sig", CLIENT_SIG));
+			exchangeParams.add(new BasicNameValuePair("callerSig", CLIENT_SIG));
+			if (loc != null) {
+				exchangeParams.add(new BasicNameValuePair("device_country", loc.getLanguage()));
+				exchangeParams.add(new BasicNameValuePair("lang", loc.getLanguage()));
+			}
+			Map<String, String> exMap = doPost(client, exchangeParams);
+			if (exMap.containsKey("Token")) {
+				cred = exMap.get("Token");
+				discoveredMasterToken = cred;
+			}
+		}
+
+		String epwd = null;
+		if (cred.startsWith("aas_et/")) {
+			epwd = cred;
+			discoveredMasterToken = cred;
+		}
+		else {
+			try {
+				epwd = encryptString(uid + "\u0000" + cred);
+			}
+			catch (Exception e) {
+				throw new RuntimeException("Could not encrypt password", e);
+			}
 		}
 
 		List<NameValuePair> params = new ArrayList<NameValuePair>();
@@ -140,11 +200,14 @@ class Identity {
 		params.add(new BasicNameValuePair("EncryptedPasswd", epwd));
 		params.add(new BasicNameValuePair("service", SERVICE));
 		params.add(new BasicNameValuePair("add_account", "1"));
-		params.add(new BasicNameValuePair("sdk_version", "16"));
+		params.add(new BasicNameValuePair("sdk_version", "33"));
 		params.add(new BasicNameValuePair("accountType", "HOSTED_OR_GOOGLE"));
-		params.add(new BasicNameValuePair("hasPermission", "1"));
+		params.add(new BasicNameValuePair("has_permission", "1"));
 		params.add(new BasicNameValuePair("source", "android"));
 		params.add(new BasicNameValuePair("app", "com.android.vending"));
+		params.add(new BasicNameValuePair("client_sig", CLIENT_SIG));
+		params.add(new BasicNameValuePair("callerPkg", "com.android.vending"));
+		params.add(new BasicNameValuePair("callerSig", CLIENT_SIG));
 		if (loc != null) {
 			params.add(new BasicNameValuePair("device_country", loc.getLanguage()));
 			params.add(new BasicNameValuePair("lang", loc.getLanguage()));
@@ -158,8 +221,12 @@ class Identity {
 		ret.services = map.get("services");
 		ret.authToken = map.get("Auth");
 		String tok = map.get("Token");
-
 		if (tok != null && tok.length() > 0) {
+			discoveredMasterToken = tok;
+		}
+		ret.masterToken = discoveredMasterToken;
+
+		if (tok != null && tok.length() > 0 && !cred.startsWith("aas_et/")) {
 			// Since mid Oct/2017, "Token" must be sent back if account details
 			// (first-, lastname, services) are requested by "add_account".
 			// Otherwise the "Auth" cookie will have a short TTL.
@@ -171,6 +238,7 @@ class Identity {
 			params.add(new BasicNameValuePair("service", SERVICE));
 			params.add(new BasicNameValuePair("accountType", "HOSTED_OR_GOOGLE"));
 			params.add(new BasicNameValuePair("app", "com.android.vending"));
+			params.add(new BasicNameValuePair("client_sig", CLIENT_SIG));
 			map = doPost(client, params);
 			ret.authToken = map.get("Auth");
 		}

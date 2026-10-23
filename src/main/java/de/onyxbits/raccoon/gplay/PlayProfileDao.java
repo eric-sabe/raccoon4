@@ -33,7 +33,7 @@ public class PlayProfileDao extends DataAccessObject implements Variables {
 	/**
 	 * Table version
 	 */
-	protected static final int VERSION = 2;
+	protected static final int VERSION = 3;
 
 	@Override
 	protected void upgradeFrom(int oldVersion, Connection c) throws SQLException {
@@ -43,6 +43,9 @@ public class PlayProfileDao extends DataAccessObject implements Variables {
 			}
 			case 2: {
 				v2(c);
+			}
+			case 3: {
+				v3(c);
 			}
 		}
 	}
@@ -61,6 +64,14 @@ public class PlayProfileDao extends DataAccessObject implements Variables {
 	private static void v2(Connection c) throws SQLException {
 		Statement st = c.createStatement();
 		st.execute("ALTER TABLE playprofiles ADD pass VARCHAR(255)");
+		st.close();
+	}
+
+	private static void v3(Connection c) throws SQLException {
+		Statement st = c.createStatement();
+		st.execute("ALTER TABLE playprofiles ALTER COLUMN pass SET DATA TYPE VARCHAR(4096)");
+		st.execute("ALTER TABLE playprofiles ALTER COLUMN token SET DATA TYPE VARCHAR(4096)");
+		st.execute("ALTER TABLE playprofiles ALTER COLUMN agent SET DATA TYPE VARCHAR(2048)");
 		st.close();
 	}
 

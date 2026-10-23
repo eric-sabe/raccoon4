@@ -256,20 +256,35 @@ public class GooglePlayAPI {
 	 * Logins AC2DM server and returns authentication string.
 	 */
 	public String loginAC2DM() throws IOException {
+		String cred = Identity.normalizeCredential(this.password);
+		if (cred.startsWith("oauth2_4/")) {
+			Identity ident = Identity.signIn(getClient(), this.getEmail(), cred);
+			if (ident.getMasterToken() != null) {
+				this.password = ident.getMasterToken();
+				cred = this.password;
+			}
+		}
+		String encryptedOrMaster = cred.startsWith("aas_et/")
+				? cred
+				: encryptString(this.getEmail() + "\u0000" + cred);
 		HttpEntity c2dmResponseEntity = executePost(URL_LOGIN,
 				new String[][] {
 						{ "Email", this.getEmail() },
-						{ "EncryptedPasswd",
-								encryptString(this.getEmail() + "\u0000" + this.password) },
+						{ "EncryptedPasswd", encryptedOrMaster },
 						{ "add_account", "1" }, { "service", "ac2dm" },
 						{ "accountType", ACCOUNT_TYPE_HOSTED_OR_GOOGLE },
 						{ "has_permission", "1" }, { "source", "android" },
-						{ "app", "com.google.android.gsf" }, { "device_country", "us" },
-						{ "device_country", "us" }, { "lang", "en" },
-						{ "sdk_version", "16" }, }, null);
+						{ "app", "com.google.android.gsf" },
+						{ "client_sig", "38918a453d07199354f8b19af05ec6562ced5788" },
+						{ "device_country", "us" },
+						{ "lang", "en" },
+						{ "sdk_version", "33" }, }, null);
 
 		Map<String, String> c2dmAuth = Utils.parseResponse(new String(Utils
 				.readAll(c2dmResponseEntity.getContent())));
+		if (c2dmAuth.containsKey("Token") && c2dmAuth.get("Token").startsWith("aas_et/")) {
+			this.password = c2dmAuth.get("Token");
+		}
 		return c2dmAuth.get("Auth");
 
 	}
@@ -301,23 +316,15 @@ public class GooglePlayAPI {
 	 * email and password every time.
 	 */
 	public void login() throws Exception {
-		/*
-		 * HttpEntity responseEntity = executePost(URL_LOGIN, new String[][] { {
-		 * "Email", this.getEmail() }, { "EncryptedPasswd",
-		 * encryptString(this.getEmail()+"\u0000"+this.password) }, { "service",
-		 * "androidmarket" }, { "add_account", "1"}, { "accountType",
-		 * ACCOUNT_TYPE_HOSTED_OR_GOOGLE }, { "has_permission", "1" }, { "source",
-		 * "android" }, { "androidId", this.getAndroidID() }, { "app",
-		 * "com.android.vending" }, { "device_country", "en" }, { "lang", "en" }, {
-		 * "sdk_version", "17" }, }, null);
-		 * 
-		 * Map<String, String> response = Utils.parseResponse(new
-		 * String(Utils.readAll(responseEntity .getContent()))); if
-		 * (response.containsKey("Auth")) { setToken(response.get("Auth")); } else {
-		 * throw new GooglePlayException("Authentication failed!"); }
-		 */
 		Identity ident = Identity.signIn(getClient(), getEmail(), password);
 		setToken(ident.getAuthToken());
+		if (ident.getMasterToken() != null && !ident.getMasterToken().isEmpty()) {
+			this.password = ident.getMasterToken();
+		}
+	}
+
+	public String getPassword() {
+		return password;
 	}
 
 	/**
@@ -744,7 +751,10 @@ public class GooglePlayAPI {
 		return new String[][] {
 				{ "Accept-Language",
 						getLocalization() != null ? getLocalization() : "en-EN" },
-				{ "Authorization", "GoogleLogin auth=" + token },
+				{
+						"Authorization",
+						(token != null && token.startsWith("ya29.")) ? "Bearer " + token
+								: "GoogleLogin auth=" + token },
 				{ "X-DFE-Enabled-Experiments",
 						"cl:billing.select_add_instrument_by_default" },
 				{

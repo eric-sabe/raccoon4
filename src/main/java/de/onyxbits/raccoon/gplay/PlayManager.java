@@ -41,6 +41,9 @@ import com.akdeniz.googleplaycrawler.Utils;
 
 import de.onyxbits.raccoon.db.DatabaseManager;
 import de.onyxbits.raccoon.db.Variables;
+import de.onyxbits.raccoon.ptools.BridgeManager;
+import de.onyxbits.raccoon.ptools.Device;
+import de.onyxbits.raccoon.repo.Layout;
 
 /**
  * Core glue, tying everything else together
@@ -226,15 +229,44 @@ public class PlayManager implements Variables {
 	 * Force (re-)authentication with Play and persist the token.
 	 */
 	public void login() {
-		GooglePlayAPI api = createConnection();
+		PlayProfile active = databaseManager.get(PlayProfileDao.class).get();
+		if (active == null) {
+			return;
+		}
+		try {
+			BridgeManager bm = new BridgeManager(Layout.DEFAULT);
+			bm.startup();
+			List<Device> devs = bm.listDevices();
+			bm.shutdown();
+			for (Device d : devs) {
+				if (d.isAuthorized()) {
+					String fresh = d.getGooglePlayToken(true);
+					if (fresh != null && !fresh.isEmpty()) {
+						active.setToken(fresh);
+						if (active.getPassword() == null
+								|| active.getPassword().startsWith("ya29.")) {
+							active.setPassword(fresh);
+						}
+						databaseManager.get(PlayProfileDao.class).update(active);
+						return;
+					}
+				}
+			}
+		}
+		catch (Exception e) {
+		}
+		GooglePlayAPI api = createConnection(active);
+		api.setClient(de.onyxbits.raccoon.setup.LoginLogic.createLoginClient());
 		try {
 			api.login();
 		}
 		catch (Exception e) {
 			e.printStackTrace();
 		}
-		PlayProfile active = databaseManager.get(PlayProfileDao.class).get();
 		active.setToken(api.getToken());
+		if (api.getPassword() != null && !api.getPassword().isEmpty()) {
+			active.setPassword(api.getPassword());
+		}
 		try {
 			databaseManager.get(PlayProfileDao.class).update(active);
 		}

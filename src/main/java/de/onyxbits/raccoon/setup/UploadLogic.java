@@ -86,11 +86,14 @@ public class UploadLogic extends WizardBuilder {
 		GooglePlayAPI api = PlayManager.createConnection(pp);
 		api.setClient(LoginLogic.createLoginClient());
 		try {
-			if (pp.getGsfId() == null) {
+			if (pp.getGsfId() == null || pp.getGsfId().trim().isEmpty()) {
 				api.checkin(); // Generates the GSF ID
 				api.login();
 				api.uploadDeviceConfig();
 				pp.setGsfId(api.getAndroidID());
+				if (api.getPassword() != null && !api.getPassword().isEmpty()) {
+					pp.setPassword(api.getPassword());
+				}
 				Thread.sleep(6000);
 			}
 		}

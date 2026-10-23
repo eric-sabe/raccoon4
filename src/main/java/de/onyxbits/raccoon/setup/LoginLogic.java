@@ -87,6 +87,9 @@ public class LoginLogic extends WizardBuilder {
 			api.setClient(createLoginClient());
 			api.login();
 			pp.setToken(api.getToken());
+			if (api.getPassword() != null && !api.getPassword().isEmpty()) {
+				pp.setPassword(api.getPassword());
+			}
 		}
 		catch (Exception e) {
 			err = e;
@@ -121,12 +124,12 @@ public class LoginLogic extends WizardBuilder {
 		}
 		else {
 			previous.setEnabled(true);
-			if ("Error=BadAuthentication".equals(err.getMessage())) {
-				// TODO rewrite the Google play API to throw a proper exception.
+			String msg = err.getMessage() != null ? err.getMessage() : err.toString();
+			if (msg.contains("BadAuthentication")) {
 				status.setText(Messages.getString("LoginLogic.badcredentials"));
 				return;
 			}
-			if (err.getMessage().startsWith("Error=NeedsBrowser")) {
+			if (msg.contains("NeedsBrowser")) {
 				status.setText(Messages.getString("LoginLogic.oauthonly"));
 				return;
 			}
@@ -134,8 +137,9 @@ public class LoginLogic extends WizardBuilder {
 				status.setText(Messages.getString("LoginLogic.unknownhost"));
 				return;
 			}
-			status.setText(err.getLocalizedMessage());
-			throw (new RuntimeException(err));
+			status.setText(err.getLocalizedMessage() != null
+					? err.getLocalizedMessage()
+					: msg);
 		}
 	}
 
