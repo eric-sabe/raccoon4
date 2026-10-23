@@ -44,8 +44,16 @@ public final class Bookmarks {
 	public static final URI SUPPORT;
 
 	static {
-		Currency currency = Currency.getInstance(Locale.getDefault());
-		String cc = currency.getCurrencyCode().toLowerCase();
+		String cc = "usd";
+		try {
+			Currency currency = Currency.getInstance(Locale.getDefault());
+			if (currency != null) {
+				cc = currency.getCurrencyCode().toLowerCase();
+			}
+		}
+		catch (Exception e) {
+			// Default locale may not have a country/currency associated with it.
+		}
 		FEATURELIST = PREMIUM.resolve("/benefits?offers=" + cc);
 		ORDER = PREMIUM.resolve("/?offers=" + cc);
 

@@ -111,7 +111,7 @@ class AppListHandler extends AbstractHandler {
 		AppExpansionPatchNode patch = new AppExpansionPatchNode(layout,
 				app.getPackageName(), app.getPatchVersion());
 		AppExpansionMainNode main = new AppExpansionMainNode(layout,
-				app.getPackageName(), app.getVersionCode());
+				app.getPackageName(), app.getMainVersion());
 
 		if (ain.toIcon().getFileName().equals(components[2])) {
 			response.setContentType("image/png");
@@ -142,7 +142,7 @@ class AppListHandler extends AbstractHandler {
 
 		if (components[2].equals(ain.getFileName())) {
 			File file = ain.resolve();
-			response.setHeader("Content-Length", new Long(file.length()).toString());
+			response.setHeader("Content-Length", Long.toString(file.length()));
 
 			response.setContentType("application/vnd.android.package-archive");
 			String s = MessageFormat.format(Messages.getString("destination"),
@@ -156,7 +156,7 @@ class AppListHandler extends AbstractHandler {
 
 		if (components[2].equals(main.getFileName())) {
 			File file = main.resolve();
-			response.setHeader("Content-Length", new Long(file.length()).toString());
+			response.setHeader("Content-Length", Long.toString(file.length()));
 
 			response.setContentType("application/octet-stream");
 			String s = MessageFormat.format(Messages.getString("destination"),
@@ -169,8 +169,8 @@ class AppListHandler extends AbstractHandler {
 		}
 
 		if (components[2].equals(patch.getFileName())) {
-			File file = main.resolve();
-			response.setHeader("Content-Length", new Long(file.length()).toString());
+			File file = patch.resolve();
+			response.setHeader("Content-Length", Long.toString(file.length()));
 
 			response.setContentType("application/octet-stream");
 			String s = MessageFormat.format(Messages.getString("destination"),

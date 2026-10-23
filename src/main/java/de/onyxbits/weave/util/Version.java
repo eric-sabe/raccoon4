@@ -31,7 +31,8 @@ public class Version implements Comparable<Version> {
 	 */
 	public Version(String version) throws IllegalArgumentException {
 		try {
-			String[] tmp = version.split("\\.", 4);
+			String cleaned = version.split("-")[0];
+			String[] tmp = cleaned.split("\\.", 4);
 			major = Integer.parseInt(tmp[0]);
 			minor = Integer.parseInt(tmp[1]);
 			patch = Integer.parseInt(tmp[2]);

@@ -125,7 +125,7 @@ public final class MainLifecycle implements Lifecycle, GlobalsFactory {
 
 		// Things with no external dependencies.
 		try {
-			return requested.newInstance();
+			return requested.getDeclaredConstructor().newInstance();
 		}
 		catch (Exception e) {
 			// This is a bug!

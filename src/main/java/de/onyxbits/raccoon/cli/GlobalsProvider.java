@@ -95,7 +95,7 @@ final class GlobalsProvider implements GlobalsFactory, Variables, Runnable {
 
 		// Things with no external dependencies.
 		try {
-			return requested.newInstance();
+			return requested.getDeclaredConstructor().newInstance();
 		}
 		catch (Exception e) {
 			// This is a bug!

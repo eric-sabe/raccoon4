@@ -106,7 +106,7 @@ class FileHandler extends AbstractHandler {
 		if (file != null) {
 			// File transfer
 			String type = fileNameMap.getContentTypeFor(file.toURI().toString());
-			response.setHeader("Content-Length", new Long(file.length()).toString());
+			response.setHeader("Content-Length", Long.toString(file.length()));
 			response.setHeader("Content-Disposition", "attachment; filename=\""
 					+ file.getName() + "\"");
 
