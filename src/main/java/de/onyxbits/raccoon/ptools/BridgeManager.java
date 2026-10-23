@@ -79,7 +79,9 @@ public class BridgeManager {
 					socket.getOutputStream());
 			socket.close();
 			backend = new BridgeObserver(this);
-			new Thread(backend).start();
+			Thread observerThread = new Thread(backend, "BridgeObserver");
+			observerThread.setDaemon(true);
+			observerThread.start();
 			synchronized (backend) {
 				while (!backend.ready) {
 					backend.wait();
@@ -102,14 +104,40 @@ public class BridgeManager {
 
 	private void runAdb() throws InterruptedException, IOException {
 		ToolSupport ts = new ToolSupport(layout.binDir);
-		Runtime rt = Runtime.getRuntime();
+		List<String> candidates = new ArrayList<String>();
 		if (ts.adb.exists()) {
-			// Try the private installation first
-			rt.exec(ts.adb.getAbsolutePath() + " start-server").waitFor();
+			candidates.add(ts.adb.getAbsolutePath());
 		}
-		else {
-			// Let's hope ADB is in the PATH.
-			rt.exec("adb start-server").waitFor();
+		candidates.add("adb");
+		String home = System.getProperty("user.home", "");
+		String sdkRoot = System.getenv("ANDROID_HOME");
+		if (sdkRoot == null || sdkRoot.isEmpty()) {
+			sdkRoot = System.getenv("ANDROID_SDK_ROOT");
+		}
+		if (sdkRoot != null && !sdkRoot.isEmpty()) {
+			candidates.add(new java.io.File(sdkRoot, "platform-tools/adb")
+					.getAbsolutePath());
+		}
+		candidates.add(home + "/Library/Android/sdk/platform-tools/adb");
+		candidates.add(home + "/Android/Sdk/platform-tools/adb");
+		candidates.add("/opt/homebrew/bin/adb");
+		candidates.add("/usr/local/bin/adb");
+
+		IOException lastErr = null;
+		for (String adbBin : candidates) {
+			try {
+				if (adbBin.contains("/") && !new java.io.File(adbBin).exists()) {
+					continue;
+				}
+				new ProcessBuilder(adbBin, "start-server").start().waitFor();
+				return;
+			}
+			catch (IOException e) {
+				lastErr = e;
+			}
+		}
+		if (lastErr != null) {
+			throw lastErr;
 		}
 	}
 
@@ -177,15 +205,20 @@ public class BridgeManager {
 			OutputStream out = socket.getOutputStream();
 			ProtocolSupport.send("host:devices", in, out);
 			byte[] buf = new byte[4];
+			Device.readFully(in, buf, 0, 4);
 			int len = Integer.parseInt(new String(buf, 0, 4), 16);
+			if (len <= 0) {
+				socket.close();
+				return new ArrayList<Device>(0);
+			}
 			buf = new byte[len];
-			in.read(buf);
-			String[] lines = new String(buf, 0, len).split("\n");
+			Device.readFully(in, buf, 0, len);
+			String[] lines = new String(buf, 0, len).split("\\r?\\n");
 			ArrayList<Device> devices = new ArrayList<Device>(lines.length);
 			for (String line : lines) {
-				String[] parts = line.split("\t");
-				if (parts.length > 1) {
-					devices.add(new Device(parts[0]));
+				String[] parts = line.split("\\t");
+				if (parts.length > 1 && !parts[0].trim().isEmpty()) {
+					devices.add(new Device(parts[0].trim(), parts[1].trim()));
 				}
 			}
 			socket.close();

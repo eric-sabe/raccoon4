@@ -61,7 +61,8 @@ public class BridgeAction extends AbstractAction implements BridgeListener {
 	}
 
 	private boolean isReady(BridgeManager bm) {
-		return (bm != null && bm.isRunning() && bm.getActiveDevice() != null);
+		return (bm != null && bm.isRunning() && bm.getActiveDevice() != null
+				&& bm.getActiveDevice().isAuthorized());
 	}
 
 	/**

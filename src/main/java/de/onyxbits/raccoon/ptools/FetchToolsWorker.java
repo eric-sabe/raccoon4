@@ -75,13 +75,23 @@ public class FetchToolsWorker implements TransferWorker {
 			output = null;
 		}
 		if (bytesReceived == 0) {
-			input = new URL(getToolsUrl()).openStream();
+			java.net.URLConnection conn = new URL(getToolsUrl()).openConnection();
+			long len = conn.getContentLengthLong();
+			if (len > 0) {
+				totalBytes = len;
+			}
+			input = conn.getInputStream();
 			output = new FileOutputStream(toolFile);
 			return input;
 		}
 		if (needsDriver) {
 			needsDriver = false;
-			input = new URL(getDriverUrl()).openStream();
+			java.net.URLConnection conn = new URL(getDriverUrl()).openConnection();
+			long len = conn.getContentLengthLong();
+			if (len > 0) {
+				totalBytes += len;
+			}
+			input = conn.getInputStream();
 			output = new FileOutputStream(usbFile);
 			return input;
 		}
@@ -137,19 +147,16 @@ public class FetchToolsWorker implements TransferWorker {
 	}
 
 	private String getToolsUrl() {
-		// TODO: we should actually parse
-		// https://dl.google.com/android/repository/repository-10.xml for these
-		// urls.
 		if (isLinux()) {
-			totalBytes = 2520021;
-			return "https://dl.google.com/android/repository/platform-tools_r23.0.1-linux.zip";
+			totalBytes = 15000000;
+			return "https://dl.google.com/android/repository/platform-tools-latest-linux.zip";
 		}
 		if (isMac()) {
-			totalBytes = 2489850;
-			return "https://dl.google.com/android/repository/platform-tools_r23.0.1-macosx.zip";
+			totalBytes = 15000000;
+			return "https://dl.google.com/android/repository/platform-tools-latest-darwin.zip";
 		}
-		totalBytes = 2402978 + 8682859;
-		return "https://dl.google.com/android/repository/platform-tools_r23.0.1-windows.zip";
+		totalBytes = 15000000 + 8682859;
+		return "https://dl.google.com/android/repository/platform-tools-latest-windows.zip";
 	}
 
 	private String getDriverUrl() {

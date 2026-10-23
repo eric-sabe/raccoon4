@@ -170,9 +170,14 @@ class ExtractWorker extends SwingWorker<File, Integer> {
 
 			InputStream in = zf.getInputStream(entry);
 			ByteBuffer buffer = ByteBuffer.wrap(IOUtils.toByteArray(in));
-			ResourceTableParser resourceTableParser = new ResourceTableParser(buffer);
-			resourceTableParser.parse();
-			this.resourceTable = resourceTableParser.getResourceTable();
+			try {
+				ResourceTableParser resourceTableParser = new ResourceTableParser(buffer);
+				resourceTableParser.parse();
+				this.resourceTable = resourceTableParser.getResourceTable();
+			}
+			catch (RuntimeException e) {
+				this.resourceTable = new ResourceTable();
+			}
 		}
 		finally {
 			if (zf != null) {

@@ -90,15 +90,15 @@ class ToolSupport {
 		}
 
 		try {
-			Runtime rt = Runtime.getRuntime();
 			if (isWindows()) {
 				File inf = new File(new File(binDir, USB), "android_winusb.inf");
-				rt.exec("pnputil -i -a " + inf.getAbsolutePath()).waitFor();
+				new ProcessBuilder("pnputil", "-i", "-a", inf.getAbsolutePath())
+						.start().waitFor();
 			}
 			else {
-				rt.exec("chmod +x " + adb.getAbsolutePath()).waitFor();
-				rt.exec("chmod +x " + sqlite.getAbsolutePath()).waitFor();
-				rt.exec("chmod +x " + fastboot.getAbsolutePath()).waitFor();
+				adb.setExecutable(true);
+				sqlite.setExecutable(true);
+				fastboot.setExecutable(true);
 			}
 		}
 		catch (InterruptedException e) {

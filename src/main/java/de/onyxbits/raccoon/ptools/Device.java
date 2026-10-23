@@ -16,15 +16,19 @@
 package de.onyxbits.raccoon.ptools;
 
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.math.BigInteger;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
-
 import java.util.Vector;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * An Android device
@@ -39,6 +43,7 @@ public class Device {
 	 */
 	public final String serial;
 
+	private final String state;
 	private String host;
 	private int port;
 
@@ -48,18 +53,47 @@ public class Device {
 	private Properties propertyCache;
 
 	protected Device(String serial) {
-		this(null, 5037, serial);
+		this("localhost", 5037, serial, "device");
+	}
+
+	public Device(String serial, String state) {
+		this("localhost", 5037, serial, state);
 	}
 
 	protected Device(String host, int port, String serial) {
-		this.host = host;
+		this(host, port, serial, "device");
+	}
+
+	protected Device(String host, int port, String serial, String state) {
+		this.host = host != null ? host : "localhost";
 		this.port = port;
 		this.serial = serial;
+		this.state = state != null ? state.trim() : "device";
 		this.propertyCache = new Properties();
 	}
 
 	public String getSerial() {
 		return serial;
+	}
+
+	public String getState() {
+		return state;
+	}
+
+	public boolean isAuthorized() {
+		return "device".equals(state);
+	}
+
+	static void readFully(InputStream in, byte[] buf, int offset, int len)
+			throws IOException {
+		int total = 0;
+		while (total < len) {
+			int r = in.read(buf, offset + total, len - total);
+			if (r < 0) {
+				throw new EOFException("Unexpected EOF from ADB daemon");
+			}
+			total += r;
+		}
 	}
 
 	/**
@@ -75,6 +109,10 @@ public class Device {
 		if (propertyCache.containsKey(name)) {
 			return propertyCache.getProperty(name);
 		}
+		if ("ro.serialno".equals(name)) {
+			// On Android 9+, ro.serialno returns "unknown" for non-root shell.
+			return serial;
+		}
 		String tmp = null;
 		try {
 			// Note to self: the Android property system sources more than just
@@ -83,7 +121,7 @@ public class Device {
 		}
 		catch (IOException e) {
 		}
-		if (tmp == null || tmp.length() == 0) {
+		if (tmp == null || tmp.length() == 0 || "unknown".equalsIgnoreCase(tmp)) {
 			return def;
 		}
 		propertyCache.put(name, tmp);
@@ -115,7 +153,9 @@ public class Device {
 		}
 		catch (IOException e) {
 			try {
-				socket.close();
+				if (socket != null) {
+					socket.close();
+				}
 			}
 			catch (IOException e1) {
 			}
@@ -150,7 +190,9 @@ public class Device {
 		}
 		catch (IOException e) {
 			try {
-				socket.close();
+				if (socket != null) {
+					socket.close();
+				}
 			}
 			catch (IOException e1) {
 			}
@@ -182,13 +224,14 @@ public class Device {
 			}
 			return sb.toString();
 		}
-		catch (IOException e) {
-			try {
-				socket.close();
+		finally {
+			if (socket != null) {
+				try {
+					socket.close();
+				}
+				catch (IOException e1) {
+				}
 			}
-			catch (IOException e1) {
-			}
-			throw e;
 		}
 	}
 
@@ -214,22 +257,23 @@ public class Device {
 			out.writeBytes(remotePath);
 
 			byte[] buf = new byte[4];
-			in.read(buf);
+			readFully(in, buf, 0, 4);
 			if (ProtocolSupport.parseInt(buf, 0) == ProtocolSupport.STAT) {
 				buf = new byte[12];
-				in.read(buf);
+				readFully(in, buf, 0, 12);
 				return new RemoteFile(remotePath, ProtocolSupport.parseInt(buf, 0),
 						ProtocolSupport.parseInt(buf, 4), ProtocolSupport.parseInt(buf, 8));
 			}
 			throw new RuntimeException("File did not stat!");
 		}
-		catch (IOException e) {
-			try {
-				socket.close();
+		finally {
+			if (socket != null) {
+				try {
+					socket.close();
+				}
+				catch (IOException e1) {
+				}
 			}
-			catch (IOException e1) {
-			}
-			throw e;
 		}
 	}
 
@@ -240,10 +284,8 @@ public class Device {
 	 *          directory name
 	 * @return file listing.
 	 * @throws IOException
-	 * @throws BridgeException
 	 */
 	public List<RemoteFile> list(String remotePath) throws IOException {
-
 		Socket socket = null;
 		try {
 			socket = new Socket(host, port);
@@ -257,29 +299,32 @@ public class Device {
 			out.writeBytes(remotePath);
 			byte[] buf = new byte[512];
 			List<RemoteFile> result = new Vector<RemoteFile>();
-			in.read(buf, 0, 4);
+			readFully(in, buf, 0, 4);
 			while (ProtocolSupport.parseInt(buf, 0) == ProtocolSupport.DENT) {
-				in.read(buf, 0, 16);
+				readFully(in, buf, 0, 16);
 				int len = ProtocolSupport.parseInt(buf, 12);
-				in.read(buf, 0, len);
+				if (len > buf.length) {
+					buf = new byte[len];
+				}
+				readFully(in, buf, 0, len);
 				String fname = new String(buf, 0, len);
 				result
 						.add(new RemoteFile(fname, ProtocolSupport.parseInt(buf, 0),
 								ProtocolSupport.parseInt(buf, 4), ProtocolSupport.parseInt(buf,
 										8)));
-				in.read(buf, 0, 4);
+				readFully(in, buf, 0, 4);
 			}
 			return result;
 		}
-		catch (IOException e) {
-			try {
-				socket.close();
+		finally {
+			if (socket != null) {
+				try {
+					socket.close();
+				}
+				catch (IOException e1) {
+				}
 			}
-			catch (IOException e1) {
-			}
-			throw e;
 		}
-
 	}
 
 	/**
@@ -290,6 +335,9 @@ public class Device {
 	 */
 	public String getExternalStorageDir() throws IOException {
 		String ret = exec("echo $EXTERNAL_STORAGE").trim();
+		if (ret.isEmpty()) {
+			ret = "/sdcard/";
+		}
 		if (!(ret.endsWith("/"))) {
 			ret += "/";
 		}
@@ -307,6 +355,190 @@ public class Device {
 	}
 
 	/**
+	 * Attempt to query the device's Google Services Framework (GSF) ID in hex.
+	 * 
+	 * @return hex GSF ID or null if unavailable.
+	 */
+	public String getGsfId() {
+		try {
+			String out = exec(
+					"content query --uri content://com.google.android.gsf.gservices/prefix --projection android_id");
+			Matcher m = Pattern.compile("android_id=([0-9]+)").matcher(out);
+			if (m.find()) {
+				return new BigInteger(m.group(1)).toString(16);
+			}
+		}
+		catch (Exception e) {
+		}
+		try {
+			String out = exec(
+					"su -c 'cat /data/data/com.google.android.gms/shared_prefs/Checkin.xml'");
+			Matcher m = Pattern.compile(
+					"<string\\s+name=\"android_id\">([0-9]+)</string>").matcher(out);
+			if (m.find()) {
+				return new BigInteger(m.group(1)).toString(16);
+			}
+		}
+		catch (Exception e) {
+		}
+		try {
+			String out = exec(
+					"su -c \"sqlite3 /data/data/com.google.android.gsf/databases/gservices.db 'select value from main where name = \\\"android_id\\\";'\"")
+					.trim();
+			if (out.matches("[0-9]+")) {
+				return new BigInteger(out).toString(16);
+			}
+		}
+		catch (Exception e) {
+		}
+		return null;
+	}
+
+	/**
+	 * Query the primary Google account email signed in on the device (requires
+	 * root or dumpsys access).
+	 * 
+	 * @return Google account email or null if unavailable.
+	 */
+	public String getGoogleAccountEmail() {
+		try {
+			String out = exec(
+					"su -c 'cat /data/data/com.google.android.gms/shared_prefs/Checkin.xml'");
+			Matcher m = Pattern.compile("authAccount(?:&quot;|\"):(?:&quot;|\")([^\"&]+@[^\"&]+)(?:&quot;|\")")
+					.matcher(out);
+			if (m.find()) {
+				return m.group(1).trim();
+			}
+		}
+		catch (Exception e) {
+		}
+		try {
+			String out = exec("dumpsys account");
+			Matcher m = Pattern.compile(
+					"Account\\s*\\{\\s*name=([^,\\s}]+@[^,\\s}]+),\\s*type=com\\.google\\s*\\}")
+					.matcher(out);
+			if (m.find()) {
+				return m.group(1).trim();
+			}
+		}
+		catch (Exception e) {
+		}
+		return null;
+	}
+
+	/**
+	 * Query the Google Play Store OAuth2 token (ya29...) cached on a rooted
+	 * Android device.
+	 * 
+	 * @param refresh
+	 *          true to wake/launch Play Store first so GMS refreshes an expired
+	 *          token
+	 * @return ya29... OAuth2 token or null if unavailable
+	 */
+	public String getGooglePlayToken(boolean refresh) {
+		try {
+			if (refresh) {
+				exec("am start -n com.android.vending/.AssetBrowserActivity >/dev/null 2>&1; sleep 2");
+			}
+			String out = exec(
+					"su -c 'strings /data/system_ce/0/accounts_ce.db-wal /data/system_ce/0/accounts_ce.db 2>/dev/null'");
+			Matcher m = Pattern
+					.compile(
+							"com\\.android\\.vending:[0-9a-f]+:oauth2:https://www\\.googleapis\\.com/auth/googleplay(ya29\\.[A-Za-z0-9._-]+)")
+					.matcher(out);
+			if (m.find()) {
+				return m.group(1).trim();
+			}
+		}
+		catch (Exception e) {
+		}
+		return null;
+	}
+
+	/**
+	 * Get the installed Google Play Store (com.android.vending) versionName.
+	 * 
+	 * @return versionName or null if unavailable
+	 */
+	public String getPlayStoreVersionName() {
+		try {
+			String out = exec("dumpsys package com.android.vending");
+			Matcher m = Pattern.compile("versionName=([^\\s\\r\\n]+)").matcher(out);
+			if (m.find()) {
+				return m.group(1).trim();
+			}
+		}
+		catch (Exception e) {
+		}
+		return null;
+	}
+
+	/**
+	 * Get the installed Google Play Store (com.android.vending) versionCode.
+	 * 
+	 * @return versionCode or -1 if unavailable
+	 */
+	public int getPlayStoreVersionCode() {
+		try {
+			String out = exec("dumpsys package com.android.vending");
+			Matcher m = Pattern.compile("versionCode=([0-9]+)").matcher(out);
+			if (m.find()) {
+				return Integer.parseInt(m.group(1).trim());
+			}
+		}
+		catch (Exception e) {
+		}
+		return -1;
+	}
+
+	/**
+	 * List installed package names on the device.
+	 * 
+	 * @param thirdPartyOnly
+	 *          true to list only user-installed (-3) apps, false for all packages
+	 * @return sorted list of package names
+	 */
+	public List<String> getInstalledPackages(boolean thirdPartyOnly)
+			throws IOException {
+		String cmd = thirdPartyOnly ? "pm list packages -3" : "pm list packages";
+		String[] lines = exec(cmd).split("\\r?\\n");
+		List<String> result = new ArrayList<String>();
+		for (String line : lines) {
+			line = line.trim();
+			if (line.startsWith("package:")) {
+				String pkg = line.substring("package:".length()).trim();
+				if (!pkg.isEmpty()) {
+					result.add(pkg);
+				}
+			}
+		}
+		Collections.sort(result);
+		return result;
+	}
+
+	/**
+	 * Get the remote APK file paths on the device for a given package name.
+	 * 
+	 * @param packageName
+	 *          Android package name
+	 * @return list of remote APK paths (base.apk and any split APKs)
+	 */
+	public List<String> getApkPaths(String packageName) throws IOException {
+		String[] lines = exec("pm path " + packageName).split("\\r?\\n");
+		List<String> paths = new ArrayList<String>();
+		for (String line : lines) {
+			line = line.trim();
+			if (line.startsWith("package:")) {
+				String path = line.substring("package:".length()).trim();
+				if (!path.isEmpty()) {
+					paths.add(path);
+				}
+			}
+		}
+		return paths;
+	}
+
+	/**
 	 * List available libraries
 	 * 
 	 * @return installed libraries
@@ -319,7 +551,7 @@ public class Device {
 				for (String line : output) {
 					String[] tmp = line.split(":");
 					if (tmp.length == 2) {
-						libs.add(tmp[1]);
+						libs.add(tmp[1].trim());
 					}
 				}
 			}
@@ -342,7 +574,7 @@ public class Device {
 				for (String line : output) {
 					String[] tmp = line.split(":");
 					if (tmp.length == 2) {
-						features.add(tmp[1]);
+						features.add(tmp[1].trim());
 					}
 				}
 			}

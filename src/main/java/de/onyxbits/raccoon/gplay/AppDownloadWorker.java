@@ -226,7 +226,8 @@ class AppDownloadWorker implements TransferWorker, ActionListener {
 			}
 		}
 		download = AndroidAppDao.analyze(apkFile);
-		if (download.getName().startsWith("@string")) {
+		if (download.getName().startsWith("@")
+				|| download.getName().equals(download.getPackageName())) {
 			// Great, split APK ...
 			download.setName(appName);
 		}

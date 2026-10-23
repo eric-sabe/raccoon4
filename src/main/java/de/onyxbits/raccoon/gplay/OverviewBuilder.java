@@ -180,8 +180,18 @@ final class OverviewBuilder extends AbstractPanelBuilder implements
 		if (d == null) {
 			titleStrip.setSubTitle(Messages.getString(ID + ".nodevice"));
 		}
+		else if (!d.isAuthorized()) {
+			titleStrip.setSubTitle(d.getSerial() + " (" + d.getState()
+					+ " - allow USB debugging on phone)");
+		}
 		else {
-			titleStrip.setSubTitle(d.getSerial());
+			String model = d.getProperty("ro.product.model", null);
+			if (model != null && !model.isEmpty()) {
+				titleStrip.setSubTitle(d.getSerial() + " (" + model + ")");
+			}
+			else {
+				titleStrip.setSubTitle(d.getSerial());
+			}
 		}
 	}
 

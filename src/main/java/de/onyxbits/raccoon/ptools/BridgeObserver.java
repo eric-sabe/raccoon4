@@ -81,33 +81,29 @@ class BridgeObserver implements Runnable {
 
 	private Device pollActive(InputStream in, OutputStream out)
 			throws IOException {
-		StringBuilder sb = new StringBuilder();
-		Stack<Device> devs = new Stack<Device>();
-
 		byte[] buf = new byte[4];
-		in.read(buf);
+		Device.readFully(in, buf, 0, 4);
 		int len = Integer.parseInt(new String(buf, 0, 4), 16);
 		if (len == 0) {
 			// All devices got unplugged
 			return null;
 		}
 
-		for (int i = 0; i < len; i++) {
-			int a = in.read();
-			switch (a) {
-				case '\t': {
-					devs.push(new Device(sb.toString()));
-					break;
-				}
-				case '\n': {
-					sb.setLength(0);
-					break;
-				}
-				default: {
-					sb.append((char) a);
+		byte[] payload = new byte[len];
+		Device.readFully(in, payload, 0, len);
+		String[] lines = new String(payload, 0, len).split("\\r?\\n");
+		Device fallback = null;
+		Device authorized = null;
+		for (String line : lines) {
+			String[] parts = line.split("\\t");
+			if (parts.length >= 2 && !parts[0].trim().isEmpty()) {
+				Device dev = new Device(parts[0].trim(), parts[1].trim());
+				fallback = dev;
+				if (dev.isAuthorized()) {
+					authorized = dev;
 				}
 			}
 		}
-		return devs.pop();
+		return authorized != null ? authorized : fallback;
 	}
 }

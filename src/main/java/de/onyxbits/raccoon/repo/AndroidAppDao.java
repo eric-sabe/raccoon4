@@ -29,8 +29,13 @@ import java.util.Locale;
 import de.onyxbits.raccoon.db.DataAccessObject;
 import de.onyxbits.raccoon.db.DatasetEvent;
 
+import java.nio.ByteBuffer;
 import net.dongliu.apk.parser.ApkParser;
 import net.dongliu.apk.parser.bean.ApkMeta;
+import net.dongliu.apk.parser.parser.ApkMetaTranslator;
+import net.dongliu.apk.parser.parser.BinaryXmlParser;
+import net.dongliu.apk.parser.struct.AndroidConstants;
+import net.dongliu.apk.parser.struct.resource.ResourceTable;
 
 public final class AndroidAppDao extends DataAccessObject {
 
@@ -580,7 +585,26 @@ public final class AndroidAppDao extends DataAccessObject {
 		try {
 			apkParser = new ApkParser(apk);
 			apkParser.setPreferredLocale(Locale.getDefault());
-			meta = apkParser.getApkMeta();
+			try {
+				meta = apkParser.getApkMeta();
+			}
+			catch (Exception parseErr) {
+				byte[] manifestBytes = apkParser
+						.getFileData(AndroidConstants.MANIFEST_FILE);
+				if (manifestBytes != null) {
+					ApkMetaTranslator translator = new ApkMetaTranslator(
+							new ResourceTable(), Locale.getDefault());
+					BinaryXmlParser xmlParser = new BinaryXmlParser(
+							ByteBuffer.wrap(manifestBytes), new ResourceTable());
+					xmlParser.setLocale(Locale.getDefault());
+					xmlParser.setXmlStreamer(translator);
+					xmlParser.parse();
+					meta = translator.getApkMeta();
+				}
+				else {
+					throw parseErr;
+				}
+			}
 			apkParser.close();
 			fis = new FileInputStream(apk);
 			fis.close();
@@ -598,14 +622,15 @@ public final class AndroidAppDao extends DataAccessObject {
 
 		AndroidApp ret = new AndroidApp();
 		ret.setPackageName(meta.getPackageName());
-		if (meta.getLabel() != null) {
+		if (meta.getLabel() != null && !meta.getLabel().startsWith("@")) {
 			ret.setName(meta.getLabel());
 		}
 		else {
 			ret.setName(meta.getPackageName());
 		}
-		ret.setVersionCode(meta.getVersionCode().intValue());
-		ret.setVersion(meta.getVersionName());
+		ret.setVersionCode(
+				meta.getVersionCode() != null ? meta.getVersionCode().intValue() : 0);
+		ret.setVersion(meta.getVersionName() != null ? meta.getVersionName() : "");
 		ret.setUsesPermissions(meta.getUsesPermissions());
 		try {
 			ret.setMinSdk(Integer.parseInt(meta.getMinSdkVersion()));
