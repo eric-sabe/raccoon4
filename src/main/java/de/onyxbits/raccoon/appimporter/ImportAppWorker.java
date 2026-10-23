@@ -24,13 +24,19 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.List;
+
+import org.apache.commons.io.IOUtils;
 
 import de.onyxbits.raccoon.appmgr.DetailsViewBuilder;
 import de.onyxbits.raccoon.db.DatabaseManager;
 import de.onyxbits.raccoon.gplay.PlayAppOwnerDao;
 import de.onyxbits.raccoon.gplay.PlayProfile;
 import de.onyxbits.raccoon.gui.Messages;
+import de.onyxbits.raccoon.ptools.Device;
 import de.onyxbits.raccoon.repo.AndroidApp;
 import de.onyxbits.raccoon.repo.AndroidAppDao;
 import de.onyxbits.raccoon.repo.AppGroup;
@@ -72,6 +78,10 @@ public class ImportAppWorker implements TransferWorker, ActionListener {
 	private OutputStream outputStream;
 	private PlayProfile profile;
 	private List<AppGroup> groups;
+	private Device remoteDevice;
+	private String remotePackage;
+	private List<String> remotePaths;
+	private List<File> pulledSplits;
 
 	/**
 	 * Constructor
@@ -88,6 +98,21 @@ public class ImportAppWorker implements TransferWorker, ActionListener {
 		control = new TransferPeerBuilder(source.getName());
 		control.withChannel(Messages.getString(getClass().getSimpleName()
 				+ ".channel"));
+		this.profile = profile;
+		this.groups = groups;
+	}
+
+	/**
+	 * Constructor for pulling an app from a connected ADB device.
+	 */
+	public ImportAppWorker(Globals globals, Device device, String remotePackage,
+			List<String> remotePaths, PlayProfile profile, List<AppGroup> groups) {
+		this.remoteDevice = device;
+		this.remotePackage = remotePackage;
+		this.remotePaths = remotePaths;
+		this.globals = globals;
+		control = new TransferPeerBuilder(remotePackage);
+		control.withChannel("ADB Phone \u2192 Local storage");
 		this.profile = profile;
 		this.groups = groups;
 	}
@@ -130,6 +155,24 @@ public class ImportAppWorker implements TransferWorker, ActionListener {
 		if (profile != null) {
 			dbm.get(PlayAppOwnerDao.class).own(transferred, profile);
 		}
+		if (pulledSplits != null && dest != null) {
+			int vc = transferred.getVersionCode();
+			for (File splitTmp : pulledSplits) {
+				String name = splitTmp.getName();
+				if (name.startsWith("split_")) {
+					name = name.substring("split_".length());
+				}
+				if (name.endsWith(".apk")) {
+					name = name.substring(0, name.length() - 4);
+				}
+				File targetSplit = new File(dest.getParentFile(), name + "-" + vc + ".apk");
+				Files.move(splitTmp.toPath(), targetSplit.toPath(),
+						StandardCopyOption.REPLACE_EXISTING);
+			}
+		}
+		if (remoteDevice != null && source != null && source.exists()) {
+			source.delete();
+		}
 		closeStreams();
 	}
 
@@ -152,6 +195,40 @@ public class ImportAppWorker implements TransferWorker, ActionListener {
 	public void onPrepare() throws Exception {
 
 		Layout layout = globals.get(Layout.class);
+
+		if (remoteDevice != null) {
+			List<String> paths = (remotePaths != null && !remotePaths.isEmpty())
+					? remotePaths
+					: remoteDevice.getApkPaths(remotePackage);
+			if (paths.isEmpty()) {
+				throw new IOException("Could not find APK paths on device for " + remotePackage);
+			}
+			pulledSplits = new ArrayList<File>();
+			for (int i = 0; i < paths.size(); i++) {
+				String rpath = paths.get(i);
+				String baseName = new File(rpath).getName();
+				if (i == 0 || "base.apk".equals(baseName)) {
+					File tmpBase = File.createTempFile("raccoon-pull-", ".apk");
+					tmpBase.deleteOnExit();
+					try (InputStream in = remoteDevice.createPullStream(rpath);
+							OutputStream out = new FileOutputStream(tmpBase)) {
+						IOUtils.copy(in, out);
+					}
+					source = tmpBase;
+				}
+				else {
+					File tmpDir = Files.createTempDirectory("raccoon-split-").toFile();
+					tmpDir.deleteOnExit();
+					File tmpSplit = new File(tmpDir, baseName);
+					tmpSplit.deleteOnExit();
+					try (InputStream in = remoteDevice.createPullStream(rpath);
+							OutputStream out = new FileOutputStream(tmpSplit)) {
+						IOUtils.copy(in, out);
+					}
+					pulledSplits.add(tmpSplit);
+				}
+			}
+		}
 
 		transferred = AndroidAppDao.analyze(source);
 		if (transferred == null) {

@@ -111,6 +111,30 @@ public class Router {
 				"Register a new GSF ID");
 		options.addOption(playNewGsfId);
 
+		Option playSetup = Option
+				.builder()
+				.longOpt("gp-setup")
+				.optionalArg(true)
+				.hasArg()
+				.argName("email,token")
+				.desc(
+						"Configure Google Play profile (from connected rooted phone if no argument given, or email,password_or_token)")
+				.build();
+		options.addOption(playSetup);
+
+		Option adbDevices = new Option(null, "adb-devices", false,
+				"List connected Android devices and their ADB authorization status");
+		options.addOption(adbDevices);
+
+		Option adbList = new Option(null, "adb-list", false,
+				"List user-installed packages on the connected Android phone");
+		options.addOption(adbList);
+
+		Option adbPull = new Option(null, "adb-pull", true,
+				"Pull an installed app's APK(s) from the connected Android phone");
+		adbPull.setArgName("package");
+		options.addOption(adbPull);
+
 		CommandLine commandLine = null;
 		String downloadDir = "";
 		try {
@@ -208,6 +232,38 @@ public class Router {
 		
 		if (commandLine.hasOption(playNewGsfId.getLongOpt())) {
 			Play.registerNewGsfId();
+		}
+
+		if (commandLine.hasOption(playSetup.getLongOpt())) {
+			String val = commandLine.getOptionValue(playSetup.getLongOpt());
+			if (val == null || val.trim().isEmpty()
+					|| "adb".equalsIgnoreCase(val.trim())) {
+				Play.setupProfile(null, null);
+			}
+			else {
+				int comma = val.indexOf(',');
+				if (comma <= 0 || comma == val.length() - 1) {
+					System.err
+							.println("Usage: --gp-setup [<email>,<app_password_or_token>]");
+					System.exit(1);
+				}
+				Play.setupProfile(val.substring(0, comma).trim(),
+						val.substring(comma + 1).trim());
+			}
+		}
+
+		if (commandLine.hasOption(adbDevices.getLongOpt())) {
+			Play.adbDevices();
+		}
+
+		if (commandLine.hasOption(adbList.getLongOpt())) {
+			Play.adbListPackages();
+		}
+
+		if (commandLine.hasOption(adbPull.getLongOpt())) {
+			Play.adbPullPackage(
+					commandLine.getOptionValue(adbPull.getLongOpt()).trim(),
+					downloadDir);
 		}
 	}
 }

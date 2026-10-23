@@ -25,15 +25,18 @@ import java.io.File;
 import java.util.List;
 
 import javax.swing.Action;
+import javax.swing.DefaultListModel;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
+import javax.swing.SwingWorker;
 import javax.swing.border.TitledBorder;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
@@ -45,6 +48,8 @@ import de.onyxbits.raccoon.db.DatasetListener;
 import de.onyxbits.raccoon.gplay.PlayProfile;
 import de.onyxbits.raccoon.gplay.PlayProfileDao;
 import de.onyxbits.raccoon.gui.TitleStrip;
+import de.onyxbits.raccoon.ptools.BridgeManager;
+import de.onyxbits.raccoon.ptools.Device;
 import de.onyxbits.raccoon.repo.AndroidAppDao;
 import de.onyxbits.raccoon.repo.AppGroupDao;
 import de.onyxbits.raccoon.transfer.TransferManager;
@@ -56,6 +61,7 @@ public class ImportAppBuilder extends AbstractPanelBuilder implements
 		ActionListener, DatasetListener, ListSelectionListener {
 
 	private JButton scan;
+	private JButton scanPhone;
 	private JButton imprt;
 	private JList<Candidate> list;
 	private JComboBox<PlayProfile> profile;
@@ -70,6 +76,8 @@ public class ImportAppBuilder extends AbstractPanelBuilder implements
 	public ImportAppBuilder() {
 		scan = new JButton(loadIcon("/icons/famfam/icons/folder_magnify.png"));
 		scan.setToolTipText(Messages.getString(ID + ".scan.short_description"));
+		scanPhone = new JButton(loadIcon("/icons/famfam/icons/phone.png"));
+		scanPhone.setToolTipText("Scan connected Android phone (ADB)");
 		imprt = new JButton(loadIcon("/icons/famfam/icons/folder_add.png"));
 		imprt.setToolTipText(Messages.getString(ID + ".imprt.short_description"));
 		list = new JList<Candidate>();
@@ -120,7 +128,10 @@ public class ImportAppBuilder extends AbstractPanelBuilder implements
 		gbc.fill = GridBagConstraints.NONE;
 		gbc.anchor = GridBagConstraints.NORTHWEST;
 		gbc.insets = new Insets(2, 2, 2, 2);
-		scanPanel.add(scan, gbc);
+		JPanel scanButtons = new JPanel();
+		scanButtons.add(scan);
+		scanButtons.add(scanPhone);
+		scanPanel.add(scanButtons, gbc);
 
 		JScrollPane scroll = new JScrollPane(list);
 		scroll.setPreferredSize(new Dimension(400, 200));
@@ -206,6 +217,7 @@ public class ImportAppBuilder extends AbstractPanelBuilder implements
 		imprt.addActionListener(this);
 		list.addListSelectionListener(this);
 		scan.addActionListener(this);
+		scanPhone.addActionListener(this);
 		globals.get(DatabaseManager.class).get(PlayProfileDao.class)
 				.subscribe(this);
 		globals.get(DatabaseManager.class).get(AppGroupDao.class)
@@ -213,9 +225,84 @@ public class ImportAppBuilder extends AbstractPanelBuilder implements
 		return ret;
 	}
 
+	private void scanConnectedPhone() {
+		BridgeManager bm = globals.get(BridgeManager.class);
+		if (bm != null && !bm.isRunning()) {
+			bm.startup();
+		}
+		Device device = bm != null ? bm.getActiveDevice() : null;
+		if (device == null && bm != null) {
+			List<Device> devs = bm.listDevices();
+			if (!devs.isEmpty()) {
+				device = devs.get(0);
+			}
+		}
+		if (device == null) {
+			JOptionPane.showMessageDialog(scanPhone,
+					"No Android phone detected over ADB.\nPlease connect the phone via USB and enable USB Debugging.",
+					"No ADB Device", JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+		if (!device.isAuthorized()) {
+			JOptionPane.showMessageDialog(scanPhone,
+					"Phone " + device.getSerial() + " is connected, but its status is '"
+							+ device.getState()
+							+ "'.\nPlease unlock your phone screen and tap 'Allow' on the 'Allow USB debugging?' prompt, then try again.",
+					"Device Unauthorized", JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+
+		final Device activeDev = device;
+		final DefaultListModel<Candidate> model = new DefaultListModel<Candidate>();
+		list.setModel(model);
+		progress.setDocument(new javax.swing.text.PlainDocument());
+		progress.setText("Scanning installed apps on " + activeDev.getSerial() + "...");
+		scanPhone.setEnabled(false);
+
+		new SwingWorker<List<String>, Candidate>() {
+			@Override
+			protected List<String> doInBackground() throws Exception {
+				List<String> pkgs = activeDev.getInstalledPackages(true);
+				for (String pkg : pkgs) {
+					List<String> paths = activeDev.getApkPaths(pkg);
+					publish(new Candidate(activeDev, pkg, paths));
+				}
+				return pkgs;
+			}
+
+			@Override
+			protected void process(List<Candidate> chunks) {
+				for (Candidate c : chunks) {
+					model.addElement(c);
+				}
+			}
+
+			@Override
+			protected void done() {
+				scanPhone.setEnabled(true);
+				try {
+					List<String> pkgs = get();
+					progress.setText("Found " + pkgs.size() + " user-installed apps on "
+							+ activeDev.getSerial());
+				}
+				catch (Exception err) {
+					progress.setText("Error scanning phone: " + err.getMessage());
+				}
+			}
+		}.execute();
+	}
+
 	@Override
 	public void actionPerformed(ActionEvent e) {
 		Object src = e.getSource();
+
+		if (src == scanPhone) {
+			if (scanner != null) {
+				scanner.cancel(true);
+				scanner = null;
+			}
+			scanConnectedPhone();
+		}
 
 		if (src == scan) {
 			if (scanner != null) {
@@ -239,12 +326,22 @@ public class ImportAppBuilder extends AbstractPanelBuilder implements
 		if (src == imprt) {
 			List<Candidate> selected = list.getSelectedValuesList();
 			TransferManager ts = globals.get(TransferManager.class);
+			PlayProfile selectedProfile = (PlayProfile) profile.getSelectedItem();
 			for (Candidate c : selected) {
-				ts.schedule(
-						globals,
-						new ImportAppWorker(globals, c.src, (PlayProfile) profile
-								.getSelectedItem(), groupsPanel.getSelected()),
-						TransferManager.LAN);
+				if (c.device != null && c.remotePackage != null) {
+					ts.schedule(
+							globals,
+							new ImportAppWorker(globals, c.device, c.remotePackage,
+									c.remotePaths, selectedProfile, groupsPanel.getSelected()),
+							TransferManager.LAN);
+				}
+				else {
+					ts.schedule(
+							globals,
+							new ImportAppWorker(globals, c.src, selectedProfile,
+									groupsPanel.getSelected()),
+							TransferManager.LAN);
+				}
 			}
 		}
 	}

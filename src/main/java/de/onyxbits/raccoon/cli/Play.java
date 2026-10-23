@@ -42,6 +42,9 @@ import de.onyxbits.raccoon.gplay.PlayAppOwnerDao;
 import de.onyxbits.raccoon.gplay.PlayManager;
 import de.onyxbits.raccoon.gplay.PlayProfile;
 import de.onyxbits.raccoon.gplay.PlayProfileDao;
+import de.onyxbits.raccoon.gplay.RealDevice;
+import de.onyxbits.raccoon.ptools.BridgeManager;
+import de.onyxbits.raccoon.ptools.Device;
 import de.onyxbits.raccoon.repo.AndroidApp;
 import de.onyxbits.raccoon.repo.AndroidAppDao;
 import de.onyxbits.raccoon.repo.AppExpansionMainNode;
@@ -80,6 +83,12 @@ class Play implements Variables {
 				dbm.get(VariableDao.class).getVar(PLAYPROFILE, null));
 		PlayProfile ret = dbm.get(PlayProfileDao.class).get(alias);
 		if (ret == null) {
+			setupProfile(null, null);
+			alias = System.getProperty(PLAYPROFILESYSPROP,
+					dbm.get(VariableDao.class).getVar(PLAYPROFILE, null));
+			ret = dbm.get(PlayProfileDao.class).get(alias);
+		}
+		if (ret == null) {
 			Router.fail("play.profile");
 		}
 		return ret;
@@ -97,6 +106,16 @@ class Play implements Variables {
 			System.out.println(api.details(name));
 		}
 		catch (Exception e) {
+			if (e.getMessage() != null && e.getMessage().contains("Unauthorized")
+					&& refreshFromConnectedPhone()) {
+				try {
+					System.out.println(createConnection().details(name));
+					return;
+				}
+				catch (Exception e2) {
+					e = e2;
+				}
+			}
 			Router.fail("play.exception", e.getMessage());
 		}
 	}
@@ -107,6 +126,16 @@ class Play implements Variables {
 			System.out.println(api.search(query));
 		}
 		catch (Exception e) {
+			if (e.getMessage() != null && e.getMessage().contains("Unauthorized")
+					&& refreshFromConnectedPhone()) {
+				try {
+					System.out.println(createConnection().search(query));
+					return;
+				}
+				catch (Exception e2) {
+					e = e2;
+				}
+			}
 			Router.fail("play.exception", e.getMessage());
 		}
 	}
@@ -210,19 +239,34 @@ class Play implements Variables {
 		DatabaseManager dbm = GlobalsProvider.getGlobals()
 				.get(DatabaseManager.class);
 		boolean paid = false;
+		String appTitle = null;
 		int vcode = vc;
 		int len;
 		byte[] buffer = new byte[1024 * 8];
 
 		try {
-			DetailsResponse dr = api.details(doc);
+			DetailsResponse dr;
+			try {
+				dr = api.details(doc);
+			}
+			catch (IOException e) {
+				if (e.getMessage() != null && e.getMessage().contains("Unauthorized")
+						&& refreshFromConnectedPhone()) {
+					api = createConnection();
+					dr = api.details(doc);
+				}
+				else {
+					throw e;
+				}
+			}
+			appTitle = dr.getDocV2().getTitle();
 			paid = dr.getDocV2().getOffer(0).getCheckoutFlowRequired();
 			if (vc == -1) {
 				vcode = dr.getDocV2().getDetails().getAppDetails().getVersionCode();
 			}
 		}
 		catch (IOException e) {
-			Router.fail(e.getMessage());
+			Router.fail("play.exception", e.getMessage());
 		}
 
 		DownloadData data = null;
@@ -239,7 +283,7 @@ class Play implements Variables {
 		}
 		catch (Exception e) {
 			e.printStackTrace();
-			Router.fail(e.getMessage());
+			Router.fail("play.exception", e.getMessage());
 		}
 
 		File apkFile = new AppInstallerNode(Layout.DEFAULT, doc, vcode)
@@ -262,6 +306,11 @@ class Play implements Variables {
 			System.out.println();
 			out.close();
 			AndroidApp download = AndroidAppDao.analyze(apkFile);
+			if (appTitle != null && !appTitle.isEmpty()
+					&& (download.getName().startsWith("@")
+							|| download.getName().equals(doc))) {
+				download.setName(appTitle);
+			}
 
 			if (data.hasMainExpansion()) {
 				download.setMainVersion(data.getMainFileVersion());
@@ -322,7 +371,7 @@ class Play implements Variables {
 			for (File splitFile : splitFiles) {
 				splitFile.delete();
 			}
-			Router.fail(e.getMessage());
+			Router.fail("play.exception", e.getMessage());
 		}
 	}
 
@@ -369,18 +418,54 @@ class Play implements Variables {
 		}
 	}
 
+	private static boolean refreshFromConnectedPhone() {
+		try {
+			BridgeManager bm = GlobalsProvider.getGlobals().get(BridgeManager.class);
+			List<Device> devs = bm.listDevices();
+			for (Device d : devs) {
+				if (d.isAuthorized()) {
+					String fresh = d.getGooglePlayToken(true);
+					if (fresh != null && !fresh.isEmpty()) {
+						DatabaseManager dbm = getDatabase();
+						String alias = System.getProperty(PLAYPROFILESYSPROP,
+								dbm.get(VariableDao.class).getVar(PLAYPROFILE, null));
+						PlayProfile pp = dbm.get(PlayProfileDao.class).get(alias);
+						if (pp != null) {
+							pp.setToken(fresh);
+							if (pp.getPassword() == null
+									|| pp.getPassword().startsWith("ya29.")) {
+								pp.setPassword(fresh);
+							}
+							dbm.get(PlayProfileDao.class).update(pp);
+							return true;
+						}
+					}
+				}
+			}
+		}
+		catch (Exception e) {
+		}
+		return false;
+	}
+
 	public static void auth() {
+		if (refreshFromConnectedPhone()) {
+			return;
+		}
 		PlayProfile pp = getProfile();
 		GooglePlayAPI api = createConnection();
 		api.setClient(LoginLogic.createLoginClient());
 		try {
 			api.login();
 			pp.setToken(api.getToken());
+			if (api.getPassword() != null && !api.getPassword().isEmpty()) {
+				pp.setPassword(api.getPassword());
+			}
 			getDatabase().get(PlayProfileDao.class).update(pp);
 		}
 		catch (Exception e) {
 			e.printStackTrace();
-			Router.fail("");
+			Router.fail("play.exception", e.getMessage());
 		}
 	}
 
@@ -396,18 +481,231 @@ class Play implements Variables {
 		GooglePlayAPI api = PlayManager.createConnection(pp);
 		api.setClient(LoginLogic.createLoginClient());
 		try {
-			String tmp = pp.getAlias() +": "+pp.getGsfId();
+			String tmp = pp.getAlias() + ": " + pp.getGsfId();
 			api.checkin(); // Generates the GSF ID
 			// api.login();
 			api.uploadDeviceConfig();
 			pp.setGsfId(api.getAndroidID());
+			if (api.getPassword() != null && !api.getPassword().isEmpty()) {
+				pp.setPassword(api.getPassword());
+			}
 			getDatabase().get(PlayProfileDao.class).update(pp);
-			tmp = tmp + " -> "+ pp.getGsfId();
+			tmp = tmp + " -> " + pp.getGsfId();
 			Thread.sleep(6000);
 			System.out.println(tmp);
 		}
 		catch (Exception e) {
 			e.printStackTrace();
+		}
+	}
+
+	public static void setupProfile(String email, String passwordOrToken) {
+		DatabaseManager dbm = getDatabase();
+		PlayProfileDao dao = dbm.get(PlayProfileDao.class);
+		String detectedAgent = null;
+		String detectedGsf = null;
+
+		try {
+			BridgeManager bm = GlobalsProvider.getGlobals().get(BridgeManager.class);
+			List<Device> devs = bm.listDevices();
+			for (Device d : devs) {
+				if (d.isAuthorized()) {
+					RealDevice rd = new RealDevice(d, "41.2.29-31", 84122930);
+					detectedAgent = rd.toFinskyUserAgent();
+					String gsf = d.getGsfId();
+					if (gsf != null && !gsf.isEmpty()) {
+						detectedGsf = gsf;
+					}
+					if (email == null || email.trim().isEmpty()) {
+						email = d.getGoogleAccountEmail();
+					}
+					if (passwordOrToken == null || passwordOrToken.trim().isEmpty()) {
+						passwordOrToken = d.getGooglePlayToken(true);
+					}
+					System.out.println("Using connected phone profile: " + d.getSerial());
+					break;
+				}
+			}
+		}
+		catch (Exception e) {
+		}
+
+		if (email == null || email.trim().isEmpty() || passwordOrToken == null
+				|| passwordOrToken.trim().isEmpty()) {
+			Router.fail("play.profile");
+			return;
+		}
+
+		String alias = email.contains("@") ? email.split("@")[0] : email;
+		PlayProfile pp = dao.get(alias);
+		boolean isNew = false;
+		if (pp == null) {
+			pp = new PlayProfile();
+			pp.setAlias(alias);
+			isNew = true;
+		}
+		pp.setUser(email);
+		pp.setPassword(passwordOrToken);
+		if (detectedAgent != null) {
+			pp.setAgent(detectedAgent);
+		}
+		if (detectedGsf != null) {
+			pp.setGsfId(detectedGsf);
+		}
+
+		if (pp.getAgent() == null) {
+			pp.setAgent(new GooglePlayAPI("", "").getUseragent());
+		}
+
+		GooglePlayAPI api = PlayManager.createConnection(pp);
+		api.setClient(LoginLogic.createLoginClient());
+		try {
+			api.login();
+			pp.setToken(api.getToken());
+			if (api.getPassword() != null && !api.getPassword().isEmpty()) {
+				pp.setPassword(api.getPassword());
+			}
+			if (pp.getGsfId() == null || pp.getGsfId().isEmpty()) {
+				api.checkin();
+				api.login();
+				api.uploadDeviceConfig();
+				pp.setGsfId(api.getAndroidID());
+			}
+			if (isNew) {
+				dao.add(pp);
+			}
+			else {
+				dao.update(pp);
+			}
+			dao.set(pp.getAlias());
+			System.out.println("Configured profile '" + pp.getAlias()
+					+ "' (GSF ID: " + pp.getGsfId() + ")");
+		}
+		catch (Exception e) {
+			Router.fail("play.exception", e.getMessage());
+		}
+	}
+
+	private static Device requireAuthorizedDevice() {
+		BridgeManager bm = GlobalsProvider.getGlobals().get(BridgeManager.class);
+		List<Device> devs = bm.listDevices();
+		if (devs.isEmpty()) {
+			System.err.println(
+					"No Android device detected over ADB. Make sure the phone is connected via USB and USB Debugging is enabled.");
+			System.exit(1);
+		}
+		for (Device d : devs) {
+			if (d.isAuthorized()) {
+				return d;
+			}
+		}
+		Device first = devs.get(0);
+		System.err.println("Android device " + first.getSerial()
+				+ " is connected, but its ADB status is '" + first.getState()
+				+ "'.\nPlease unlock your phone screen and tap 'Allow' on the 'Allow USB debugging?' prompt.");
+		System.exit(1);
+		return null;
+	}
+
+	public static void adbDevices() {
+		BridgeManager bm = GlobalsProvider.getGlobals().get(BridgeManager.class);
+		List<Device> devs = bm.listDevices();
+		if (devs.isEmpty()) {
+			System.out.println("No Android devices connected.");
+			return;
+		}
+		for (Device d : devs) {
+			if (d.isAuthorized()) {
+				String model = d.getProperty("ro.product.model", "Android");
+				String rel = d.getProperty("ro.build.version.release", "?");
+				System.out.println(d.getSerial() + "\t" + d.getState() + "\t" + model
+						+ " (Android " + rel + ")");
+			}
+			else {
+				System.out.println(d.getSerial() + "\t" + d.getState()
+						+ "\t(Unlock phone and accept 'Allow USB debugging?' prompt)");
+			}
+		}
+	}
+
+	public static void adbListPackages() {
+		Device d = requireAuthorizedDevice();
+		try {
+			List<String> pkgs = d.getInstalledPackages(true);
+			for (String pkg : pkgs) {
+				System.out.println(pkg);
+			}
+		}
+		catch (IOException e) {
+			Router.fail("play.exception", e.getMessage());
+		}
+	}
+
+	public static void adbPullPackage(String packageName, String downloadDir) {
+		Device d = requireAuthorizedDevice();
+		DatabaseManager dbm = GlobalsProvider.getGlobals()
+				.get(DatabaseManager.class);
+		try {
+			List<String> paths = d.getApkPaths(packageName);
+			if (paths.isEmpty()) {
+				System.err.println("Package not found on device: " + packageName);
+				System.exit(1);
+			}
+			File tmpBase = File.createTempFile("raccoon-adb-", ".apk");
+			tmpBase.deleteOnExit();
+			byte[] buffer = new byte[1024 * 8];
+			int len;
+
+			try (InputStream in = d.createPullStream(paths.get(0));
+					OutputStream out = new FileOutputStream(tmpBase)) {
+				while ((len = in.read(buffer)) > 0) {
+					out.write(buffer, 0, len);
+				}
+			}
+
+			AndroidApp analyzed = AndroidAppDao.analyze(tmpBase);
+			int vcode = analyzed != null ? analyzed.getVersionCode() : 1;
+			File apkFile = new AppInstallerNode(Layout.DEFAULT, packageName, vcode)
+					.resolve(downloadDir);
+			apkFile.getParentFile().mkdirs();
+			java.nio.file.Files.move(tmpBase.toPath(), apkFile.toPath(),
+					java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+			System.out.println(apkFile);
+
+			for (int i = 1; i < paths.size(); i++) {
+				String rpath = paths.get(i);
+				String name = new File(rpath).getName();
+				if (name.startsWith("split_")) {
+					name = name.substring("split_".length());
+				}
+				if (name.endsWith(".apk")) {
+					name = name.substring(0, name.length() - 4);
+				}
+				File splitFile = new File(apkFile.getParentFile(),
+						name + "-" + vcode + ".apk");
+				try (InputStream in = d.createPullStream(rpath);
+						OutputStream out = new FileOutputStream(splitFile)) {
+					System.out.println(splitFile);
+					while ((len = in.read(buffer)) > 0) {
+						out.write(buffer, 0, len);
+						System.out.print('#');
+					}
+					System.out.println();
+				}
+			}
+
+			if ("".equals(downloadDir) && analyzed != null) {
+				dbm.get(AndroidAppDao.class).saveOrUpdate(analyzed);
+				AppIconNode ain = new AppIconNode(Layout.DEFAULT, packageName, vcode);
+				try {
+					ain.extractFrom(apkFile);
+				}
+				catch (IOException e) {
+				}
+			}
+		}
+		catch (Exception e) {
+			Router.fail("play.exception", e.getMessage());
 		}
 	}
 
