@@ -29,9 +29,15 @@ class DroidSocket extends SSLSocket {
 	private TlsClient client;
 	private Socket base;
 	private TlsClientProtocol protocol;
+	private String hostName;
 
 	public DroidSocket(Socket base) {
+		this(base, null);
+	}
+
+	public DroidSocket(Socket base, String hostName) {
 		this.base = base;
+		this.hostName = hostName;
 	}
 
 	@Override
@@ -40,7 +46,7 @@ class DroidSocket extends SSLSocket {
 			protocol = new TlsClientProtocol(base.getInputStream(),
 					base.getOutputStream());
 			TlsCrypto crypto = new BcTlsCrypto(new SecureRandom());
-			client = new JellyBeanTlsClient(crypto);
+			client = new JellyBeanTlsClient(crypto, hostName);
 			protocol.connect(client);
 		}
 	}

@@ -21,9 +21,10 @@ class OrderedHashtable extends Hashtable<Integer, Object> {
 	private Vector<Integer> ordered = new Vector<>();
 
 	public synchronized Object put(Integer key, Object value) {
-		super.put(key, value);
-		ordered.add(key);
-		return value;
+		if (!ordered.contains(key)) {
+			ordered.add(key);
+		}
+		return super.put(key, value);
 	}
 
 	public synchronized Enumeration<Integer> keys() {

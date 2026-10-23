@@ -30,13 +30,16 @@ import javax.net.ssl.X509TrustManager;
 
 import org.bouncycastle.tls.AlertDescription;
 import org.bouncycastle.tls.Certificate;
+import org.bouncycastle.tls.CertificateRequest;
 import org.bouncycastle.tls.KeyExchangeAlgorithm;
-import org.bouncycastle.tls.ServerOnlyTlsAuthentication;
+import org.bouncycastle.tls.TlsAuthentication;
+import org.bouncycastle.tls.TlsCredentials;
 import org.bouncycastle.tls.TlsFatalAlert;
+import org.bouncycastle.tls.TlsServerCertificate;
 import org.bouncycastle.tls.TlsUtils;
 import org.bouncycastle.tls.crypto.TlsCertificate;
 
-public class DefaultTlsAuthentication extends ServerOnlyTlsAuthentication {
+public class DefaultTlsAuthentication implements TlsAuthentication {
 
 	private TrustManager[] trustManagers;
 	private CertificateFactory certificateFactory;
@@ -58,20 +61,29 @@ public class DefaultTlsAuthentication extends ServerOnlyTlsAuthentication {
 	}
 
 	@Override
-	public void notifyServerCertificate(Certificate serverCertificate)
+	public TlsCredentials getClientCredentials(
+			CertificateRequest certificateRequest) throws IOException {
+		return null;
+	}
+
+	@Override
+	public void notifyServerCertificate(TlsServerCertificate serverCertificate)
 			throws IOException {
 
-		if (serverCertificate == null || serverCertificate.isEmpty()) {
+		Certificate cert = serverCertificate != null
+				? serverCertificate.getCertificate()
+				: null;
+		if (cert == null || cert.isEmpty()) {
 			throw new TlsFatalAlert(AlertDescription.handshake_failure);
 		}
 		if (trustManagers == null || certificateFactory == null) {
 			throw new TlsFatalAlert(AlertDescription.unknown_ca);
 		}
 		if (authType == null) {
-			throw new TlsFatalAlert(AlertDescription.internal_error);
+			authType = "ECDHE_RSA";
 		}
 
-		TlsCertificate[] certificates = serverCertificate.getCertificateList();
+		TlsCertificate[] certificates = cert.getCertificateList();
 		X509Certificate[] chain = new X509Certificate[certificates.length];
 		ByteArrayInputStream bis = null;
 		for (int i = 0; i < chain.length; i++) {
@@ -92,14 +104,22 @@ public class DefaultTlsAuthentication extends ServerOnlyTlsAuthentication {
 			}
 		}
 
+		String effectiveAuthType = chain[0].getPublicKey().getAlgorithm();
+		if ("EC".equalsIgnoreCase(effectiveAuthType)) {
+			effectiveAuthType = "ECDHE_ECDSA";
+		}
+		else {
+			effectiveAuthType = authType;
+		}
+
 		for (TrustManager trustManager : trustManagers) {
 			if (trustManager instanceof X509TrustManager) {
 				X509TrustManager x509TrustManager = (X509TrustManager) trustManager;
 				try {
-					x509TrustManager.checkServerTrusted(chain, authType);
+					x509TrustManager.checkServerTrusted(chain, effectiveAuthType);
 				}
 				catch (Exception e) {
-					throw new IOException(e.getCause());
+					throw new IOException(e.getCause() != null ? e.getCause() : e);
 				}
 			}
 		}
@@ -142,7 +162,7 @@ public class DefaultTlsAuthentication extends ServerOnlyTlsAuthentication {
 			case KeyExchangeAlgorithm.SRP_RSA:
 				return "SRP_RSA";
 			default:
-				return null;
+				return "ECDHE_RSA";
 		}
 	}
 }

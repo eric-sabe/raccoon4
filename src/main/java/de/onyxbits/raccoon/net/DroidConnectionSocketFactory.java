@@ -30,7 +30,7 @@ public class DroidConnectionSocketFactory implements
 	@Override
 	public Socket createLayeredSocket(Socket socket, String target, int port,
 			HttpContext context) throws IOException, UnknownHostException {
-		return new DroidSocket(socket);
+		return new DroidSocket(socket, target);
 	}
 
 }
